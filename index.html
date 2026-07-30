@@ -338,12 +338,11 @@ let currentHeldNotes = null;
 let currentHeldChord = null;
 
 async function initAudio(){
-  // Reverted to original crisp filter frequency & effects chain, but added slight smoothing to envelope/timing
-  const filter = new Tone.Filter({ frequency: 2800, type: "lowpass", rolloff: -12 });
-  const chorus = new Tone.Chorus({ frequency: 1.2, delayTime: 4.0, depth: 0.6, wet: 0.3 }).start();
-  const reverb = new Tone.Reverb({ decay: 2.4, preDelay: 0.02, wet: 0.32 });
+  const filter = new Tone.Filter({ frequency: 2400, type: "lowpass", rolloff: -12 });
+  const chorus = new Tone.Chorus({ frequency: 1.0, delayTime: 4.5, depth: 0.65, wet: 0.35 }).start();
+  const reverb = new Tone.Reverb({ decay: 3.0, preDelay: 0.03, wet: 0.4 });
   await reverb.ready;
-  const comp = new Tone.Compressor(-14, 2.5);
+  const comp = new Tone.Compressor(-15, 3);
 
   comp.connect(chorus);
   chorus.connect(filter);
@@ -353,20 +352,20 @@ async function initAudio(){
   pluckVoices = [];
   for(let i = 0; i < NUM_VOICES; i++){
     const voice = new Tone.PluckSynth({
-      attackNoise: 0.6,
-      dampening: 4200,
-      resonance: 0.96
+      attackNoise: 0.4,
+      dampening: 3200,
+      resonance: 0.98
     });
     voice.connect(comp);
     pluckVoices.push(voice);
   }
 
-  // Exact original PluckSynth + PolySynth character, just slightly softer release edge to prevent sudden clicks
+  // Smooth crossfading synth pad to eliminate abrupt clipping or pops between chord changes
   sustainSynth = new Tone.PolySynth(Tone.Synth, {
-    oscillator: { type: "triangle8", count: 2, spread: 12 },
-    envelope: { attack: 0.08, decay: 0.4, sustain: 0.65, release: 0.45 }
+    oscillator: { type: "triangle8", count: 2, spread: 10 },
+    envelope: { attack: 0.15, decay: 0.4, sustain: 0.7, release: 0.6 }
   });
-  sustainSynth.volume.value = -12;
+  sustainSynth.volume.value = -13;
   sustainSynth.connect(comp);
 }
 
@@ -375,22 +374,46 @@ function attackChord(chordName){
   const notes = CHORD_LIBRARY[chordName];
   const now = Tone.now();
   
-  // Tiny micro-staggering to keep the exact same pluck sound while avoiding harsh digital clipping
+  // Clean fluid strum timing
   notes.forEach((n, i) => {
     const voice = pluckVoices[i % pluckVoices.length];
-    voice.triggerAttack(n, now + i * 0.02);
+    voice.triggerAttack(n, now + i * 0.025);
   });
-  sustainSynth.triggerAttack(notes, now + 0.02);
+  
+  sustainSynth.triggerAttack(notes, now + 0.03);
   currentHeldNotes = notes;
   currentHeldChord = chordName;
 }
 
 function releaseChord(){
-  if(sustainSynth){
-    sustainSynth.releaseAll(Tone.now() + 0.05); 
+  if(sustainSynth && currentHeldNotes){
+    // Smooth overlap transition: fade out previous notes gently over 0.25s instead of abrupt cut
+    sustainSynth.triggerRelease(currentHeldNotes, Tone.now() + 0.25);
   }
   currentHeldNotes = null;
   currentHeldChord = null;
+}
+
+function transitionChord(newChordName){
+  if(newChordName === currentHeldChord) return;
+  
+  const now = Tone.now();
+  if(sustainSynth && currentHeldNotes){
+    // Overlapping release for the old notes to create a legato, flowing transition
+    sustainSynth.triggerRelease(currentHeldNotes, now + 0.25);
+  }
+
+  const notes = CHORD_LIBRARY[newChordName];
+  if(!notes) return;
+
+  notes.forEach((n, i) => {
+    const voice = pluckVoices[i % pluckVoices.length];
+    voice.triggerAttack(n, now + 0.05 + i * 0.025);
+  });
+  
+  sustainSynth.triggerAttack(notes, now + 0.08);
+  currentHeldNotes = notes;
+  currentHeldChord = newChordName;
 }
 
 const video = document.getElementById('video');
@@ -439,7 +462,7 @@ const INNER_R_FRAC = 0.14;
 
 let smX = null, smY = null;
 let smOpen = null;
-const OPEN_SMOOTHING = 0.25; 
+const OPEN_SMOOTHING = 0.3; 
 
 let handIsOpen = false;
 const OPEN_ENTER = 55;
@@ -547,10 +570,15 @@ function drawFrame(){
     ? wheelChords[activeSegment]
     : null;
 
-  if(desiredChord !== currentHeldChord){
-    releaseChord();
-    if(desiredChord){
-      attackChord(desiredChord);
+  if(!desiredChord){
+    if(currentHeldChord) releaseChord();
+  } else {
+    if(desiredChord !== currentHeldChord){
+      if(!currentHeldChord){
+        attackChord(desiredChord);
+      } else {
+        transitionChord(desiredChord);
+      }
     }
   }
 
