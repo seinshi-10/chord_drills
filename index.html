@@ -338,6 +338,7 @@ let currentHeldNotes = null;
 let currentHeldChord = null;
 
 async function initAudio(){
+  // Reverted to original crisp filter frequency & effects chain, but added slight smoothing to envelope/timing
   const filter = new Tone.Filter({ frequency: 2800, type: "lowpass", rolloff: -12 });
   const chorus = new Tone.Chorus({ frequency: 1.2, delayTime: 4.0, depth: 0.6, wet: 0.3 }).start();
   const reverb = new Tone.Reverb({ decay: 2.4, preDelay: 0.02, wet: 0.32 });
@@ -360,9 +361,10 @@ async function initAudio(){
     pluckVoices.push(voice);
   }
 
+  // Exact original PluckSynth + PolySynth character, just slightly softer release edge to prevent sudden clicks
   sustainSynth = new Tone.PolySynth(Tone.Synth, {
     oscillator: { type: "triangle8", count: 2, spread: 12 },
-    envelope: { attack: 0.08, decay: 0.4, sustain: 0.65, release: 0.35 }
+    envelope: { attack: 0.08, decay: 0.4, sustain: 0.65, release: 0.45 }
   });
   sustainSynth.volume.value = -12;
   sustainSynth.connect(comp);
@@ -372,6 +374,8 @@ function attackChord(chordName){
   if(!sustainSynth || !CHORD_LIBRARY[chordName]) return;
   const notes = CHORD_LIBRARY[chordName];
   const now = Tone.now();
+  
+  // Tiny micro-staggering to keep the exact same pluck sound while avoiding harsh digital clipping
   notes.forEach((n, i) => {
     const voice = pluckVoices[i % pluckVoices.length];
     voice.triggerAttack(n, now + i * 0.02);
@@ -383,7 +387,7 @@ function attackChord(chordName){
 
 function releaseChord(){
   if(sustainSynth){
-    sustainSynth.releaseAll(); 
+    sustainSynth.releaseAll(Tone.now() + 0.05); 
   }
   currentHeldNotes = null;
   currentHeldChord = null;
@@ -414,8 +418,8 @@ function setupMediaPipe(){
   
   hands.setOptions({
     maxNumHands: 1,
-    modelComplexity: 1, // High precision tracking mode
-    minDetectionConfidence: 0.8, // Tighter precision filtering
+    modelComplexity: 1,
+    minDetectionConfidence: 0.8,
     minTrackingConfidence: 0.8
   });
 
@@ -498,7 +502,6 @@ function updateCalibration(raw){
 function drawFrame(){
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  // Responsive scale: compact wheel size for mobile/portrait, optimized layout
   const isMobile = canvas.width < 768;
   const WHEEL_X_FRAC = isMobile ? 0.78 : 0.70;
   const cx = canvas.width * WHEEL_X_FRAC;
