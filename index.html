@@ -234,7 +234,7 @@
   }
   .chip{
     display:flex; align-items:center; gap:0;
-    background:rgba(23,19,16,0.85);
+    background:rgba(17,15,13,0.85);
     border:1px solid rgba(233,228,216,0.16);
     padding:4px 9px;
     font-size:11px;
@@ -331,62 +331,52 @@ const CHORD_LIBRARY = {
 
 let wheelChords = ["A", "F#m", "D", "E"];
 
-const NUM_VOICES = 6;
-let pluckVoices = [];
-let sustainSynth = null;
-let currentHeldNotes = null;
+let synth = null;
 let currentHeldChord = null;
 
 async function initAudio(){
-  const filter = new Tone.Filter({ frequency: 2800, type: "lowpass", rolloff: -12 });
-  const chorus = new Tone.Chorus({ frequency: 1.2, delayTime: 4.0, depth: 0.6, wet: 0.3 }).start();
-  const reverb = new Tone.Reverb({ decay: 2.4, preDelay: 0.02, wet: 0.32 });
+  // Lush warm chorus, filter and reverb setup for rich acoustic guitar pad body
+  const filter = new Tone.Filter({ frequency: 3200, type: "lowpass" });
+  const chorus = new Tone.Chorus({ frequency: 1.5, delayTime: 3.5, depth: 0.5, wet: 0.25 }).start();
+  const reverb = new Tone.Reverb({ decay: 2.8, preDelay: 0.01, wet: 0.35 });
   await reverb.ready;
-  const comp = new Tone.Compressor(-14, 2.5);
+  const comp = new Tone.Compressor(-12, 3);
 
   comp.connect(chorus);
   chorus.connect(filter);
   filter.connect(reverb);
   reverb.toDestination();
 
-  pluckVoices = [];
-  for(let i = 0; i < NUM_VOICES; i++){
-    const voice = new Tone.PluckSynth({
-      attackNoise: 0.6,
-      dampening: 4200,
-      resonance: 0.96
-    });
-    voice.connect(comp);
-    pluckVoices.push(voice);
-  }
-
-  sustainSynth = new Tone.PolySynth(Tone.Synth, {
-    oscillator: { type: "triangle8", count: 2, spread: 12 },
-    envelope: { attack: 0.08, decay: 0.4, sustain: 0.65, release: 0.35 }
+  // PolySynth configured for rich, organic sustained chords without clicking
+  synth = new Tone.PolySynth(Tone.Synth, {
+    oscillator: { type: "triangle8" },
+    envelope: { attack: 0.05, decay: 0.2, sustain: 0.9, release: 0.5 }
   });
-  sustainSynth.volume.value = -12;
-  sustainSynth.connect(comp);
+  synth.volume.value = -10;
+  synth.connect(comp);
 }
 
-function attackChord(chordName){
-  if(!sustainSynth || !CHORD_LIBRARY[chordName]) return;
+function playChord(chordName){
+  if(!synth || !CHORD_LIBRARY[chordName]) return;
+  if(currentHeldChord === chordName) return; // Already playing this chord, don't interrupt!
+
   const notes = CHORD_LIBRARY[chordName];
   const now = Tone.now();
-  notes.forEach((n, i) => {
-    const voice = pluckVoices[i % pluckVoices.length];
-    voice.triggerAttack(n, now + i * 0.02);
-  });
-  sustainSynth.triggerAttack(notes, now + 0.02);
-  currentHeldNotes = notes;
+
+  if(currentHeldChord){
+    // Smooth legato transition to new chord notes without cutting out abruptly
+    synth.releaseAll(now);
+  }
+
+  synth.triggerAttack(notes, now + 0.02);
   currentHeldChord = chordName;
 }
 
-function releaseChord(){
-  if(sustainSynth){
-    sustainSynth.releaseAll(); 
+function stopChord(){
+  if(synth && currentHeldChord){
+    synth.releaseAll(Tone.now() + 0.05);
+    currentHeldChord = null;
   }
-  currentHeldNotes = null;
-  currentHeldChord = null;
 }
 
 const video = document.getElementById('video');
@@ -414,9 +404,9 @@ function setupMediaPipe(){
   
   hands.setOptions({
     maxNumHands: 1,
-    modelComplexity: 1, // High precision tracking mode
-    minDetectionConfidence: 0.8, // Tighter precision filtering
-    minTrackingConfidence: 0.8
+    modelComplexity: 1,
+    minDetectionConfidence: 0.75,
+    minTrackingConfidence: 0.75
   });
 
   hands.onResults((results) => {
@@ -424,7 +414,7 @@ function setupMediaPipe(){
       latestLandmarks = results.multiHandLandmarks[0];
     } else {
       latestLandmarks = null;
-      releaseChord();
+      stopChord();
     }
     drawFrame();
   });
@@ -435,22 +425,26 @@ const INNER_R_FRAC = 0.14;
 
 let smX = null, smY = null;
 let smOpen = null;
-const OPEN_SMOOTHING = 0.25; 
+const OPEN_SMOOTHING = 0.35; 
 
 let handIsOpen = false;
-const OPEN_ENTER = 55;
-const OPEN_EXIT  = 35;
+const OPEN_ENTER = 52;
+const OPEN_EXIT  = 38;
 
 let calMin = 1.05, calMax = 1.75;
 const CAL_ADAPT = 0.008;
 
-function segmentForAngle(angleDeg, count){
+function segmentForAngle(angleDeg, count, currentActive){
   let bestSegment = -1;
   let minDiff = 999;
   
   for(let i = 0; i < count; i++){
     const centerDeg = 90 - i * (360 / count);
     let diff = Math.abs((angleDeg - centerDeg + 540) % 360 - 180);
+    
+    // Generous hysteresis deadzone to prevent flickering when sliding across borders
+    if(i === currentActive) diff -= 8;
+
     if(diff < minDiff){
       minDiff = diff;
       bestSegment = i;
@@ -498,7 +492,6 @@ function updateCalibration(raw){
 function drawFrame(){
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  // Responsive scale: compact wheel size for mobile/portrait, optimized layout
   const isMobile = canvas.width < 768;
   const WHEEL_X_FRAC = isMobile ? 0.78 : 0.70;
   const cx = canvas.width * WHEEL_X_FRAC;
@@ -530,7 +523,7 @@ function drawFrame(){
 
     if(dist <= R && dist >= R * INNER_R_FRAC){
       handInWheel = true;
-      activeSegment = segmentForAngle(angleDeg, count);
+      activeSegment = segmentForAngle(angleDeg, count, activeSegment);
     } else {
       activeSegment = -1;
     }
@@ -540,15 +533,10 @@ function drawFrame(){
     smX = null; smY = null; smOpen = null;
   }
 
-  const desiredChord = (handInWheel && handIsOpen && activeSegment >= 0)
-    ? wheelChords[activeSegment]
-    : null;
-
-  if(desiredChord !== currentHeldChord){
-    releaseChord();
-    if(desiredChord){
-      attackChord(desiredChord);
-    }
+  if(handInWheel && handIsOpen && activeSegment >= 0){
+    playChord(wheelChords[activeSegment]);
+  } else {
+    stopChord();
   }
 
   ctx.save();
@@ -659,14 +647,14 @@ function toggleChord(name){
     wheelChords.push(name);
   }
   activeSegment = -1;
-  releaseChord();
+  stopChord();
   buildPicker();
 }
 
 document.getElementById('resetBtn').addEventListener('click', () => {
   wheelChords = ["A", "F#m", "D", "E"];
   activeSegment = -1;
-  releaseChord();
+  stopChord();
   buildPicker();
 });
 
