@@ -338,11 +338,11 @@ let currentHeldNotes = null;
 let currentHeldChord = null;
 
 async function initAudio(){
-  const filter = new Tone.Filter({ frequency: 2400, type: "lowpass", rolloff: -12 });
-  const chorus = new Tone.Chorus({ frequency: 1.0, delayTime: 4.5, depth: 0.65, wet: 0.35 }).start();
-  const reverb = new Tone.Reverb({ decay: 3.0, preDelay: 0.03, wet: 0.4 });
+  const filter = new Tone.Filter({ frequency: 2800, type: "lowpass", rolloff: -12 });
+  const chorus = new Tone.Chorus({ frequency: 1.2, delayTime: 4.0, depth: 0.6, wet: 0.3 }).start();
+  const reverb = new Tone.Reverb({ decay: 2.4, preDelay: 0.02, wet: 0.32 });
   await reverb.ready;
-  const comp = new Tone.Compressor(-15, 3);
+  const comp = new Tone.Compressor(-14, 2.5);
 
   comp.connect(chorus);
   chorus.connect(filter);
@@ -352,20 +352,19 @@ async function initAudio(){
   pluckVoices = [];
   for(let i = 0; i < NUM_VOICES; i++){
     const voice = new Tone.PluckSynth({
-      attackNoise: 0.4,
-      dampening: 3200,
-      resonance: 0.98
+      attackNoise: 0.6,
+      dampening: 4200,
+      resonance: 0.96
     });
     voice.connect(comp);
     pluckVoices.push(voice);
   }
 
-  // Smooth crossfading synth pad to eliminate abrupt clipping or pops between chord changes
   sustainSynth = new Tone.PolySynth(Tone.Synth, {
-    oscillator: { type: "triangle8", count: 2, spread: 10 },
-    envelope: { attack: 0.15, decay: 0.4, sustain: 0.7, release: 0.6 }
+    oscillator: { type: "triangle8", count: 2, spread: 12 },
+    envelope: { attack: 0.08, decay: 0.4, sustain: 0.65, release: 0.35 }
   });
-  sustainSynth.volume.value = -13;
+  sustainSynth.volume.value = -12;
   sustainSynth.connect(comp);
 }
 
@@ -373,47 +372,21 @@ function attackChord(chordName){
   if(!sustainSynth || !CHORD_LIBRARY[chordName]) return;
   const notes = CHORD_LIBRARY[chordName];
   const now = Tone.now();
-  
-  // Clean fluid strum timing
   notes.forEach((n, i) => {
     const voice = pluckVoices[i % pluckVoices.length];
-    voice.triggerAttack(n, now + i * 0.025);
+    voice.triggerAttack(n, now + i * 0.02);
   });
-  
-  sustainSynth.triggerAttack(notes, now + 0.03);
+  sustainSynth.triggerAttack(notes, now + 0.02);
   currentHeldNotes = notes;
   currentHeldChord = chordName;
 }
 
 function releaseChord(){
-  if(sustainSynth && currentHeldNotes){
-    // Smooth overlap transition: fade out previous notes gently over 0.25s instead of abrupt cut
-    sustainSynth.triggerRelease(currentHeldNotes, Tone.now() + 0.25);
+  if(sustainSynth){
+    sustainSynth.releaseAll(); 
   }
   currentHeldNotes = null;
   currentHeldChord = null;
-}
-
-function transitionChord(newChordName){
-  if(newChordName === currentHeldChord) return;
-  
-  const now = Tone.now();
-  if(sustainSynth && currentHeldNotes){
-    // Overlapping release for the old notes to create a legato, flowing transition
-    sustainSynth.triggerRelease(currentHeldNotes, now + 0.25);
-  }
-
-  const notes = CHORD_LIBRARY[newChordName];
-  if(!notes) return;
-
-  notes.forEach((n, i) => {
-    const voice = pluckVoices[i % pluckVoices.length];
-    voice.triggerAttack(n, now + 0.05 + i * 0.025);
-  });
-  
-  sustainSynth.triggerAttack(notes, now + 0.08);
-  currentHeldNotes = notes;
-  currentHeldChord = newChordName;
 }
 
 const video = document.getElementById('video');
@@ -441,8 +414,8 @@ function setupMediaPipe(){
   
   hands.setOptions({
     maxNumHands: 1,
-    modelComplexity: 1,
-    minDetectionConfidence: 0.8,
+    modelComplexity: 1, // High precision tracking mode
+    minDetectionConfidence: 0.8, // Tighter precision filtering
     minTrackingConfidence: 0.8
   });
 
@@ -462,7 +435,7 @@ const INNER_R_FRAC = 0.14;
 
 let smX = null, smY = null;
 let smOpen = null;
-const OPEN_SMOOTHING = 0.3; 
+const OPEN_SMOOTHING = 0.25; 
 
 let handIsOpen = false;
 const OPEN_ENTER = 55;
@@ -525,6 +498,7 @@ function updateCalibration(raw){
 function drawFrame(){
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+  // Responsive scale: compact wheel size for mobile/portrait, optimized layout
   const isMobile = canvas.width < 768;
   const WHEEL_X_FRAC = isMobile ? 0.78 : 0.70;
   const cx = canvas.width * WHEEL_X_FRAC;
@@ -570,15 +544,10 @@ function drawFrame(){
     ? wheelChords[activeSegment]
     : null;
 
-  if(!desiredChord){
-    if(currentHeldChord) releaseChord();
-  } else {
-    if(desiredChord !== currentHeldChord){
-      if(!currentHeldChord){
-        attackChord(desiredChord);
-      } else {
-        transitionChord(desiredChord);
-      }
+  if(desiredChord !== currentHeldChord){
+    releaseChord();
+    if(desiredChord){
+      attackChord(desiredChord);
     }
   }
 
