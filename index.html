@@ -189,10 +189,71 @@
   }
   .hud .card .v.idle{ color:var(--string-dim); font-weight:400; }
 
-  .resetBtn{
+  /* ---------- Controls (Volume & Reset) ---------- */
+  .controls {
     position:absolute;
     top:54px; right:20px;
     z-index:15;
+    display:flex;
+    gap:8px;
+  }
+  .controls .card{
+    background:rgba(14,12,10,0.8);
+    backdrop-filter: blur(4px);
+    border:1px solid rgba(233,228,216,0.14);
+    padding:6px 10px;
+    border-radius:2px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 6px;
+  }
+  .controls .card .k {
+    font-size:8px;
+    letter-spacing:0.14em;
+    text-transform:uppercase;
+    color:var(--string-dim);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 70px;
+  }
+  .controls .card .k .val {
+    color: var(--wood);
+    font-weight: 700;
+    font-size: 10px;
+  }
+
+  /* Custom Range Slider Styling */
+  input[type=range] {
+    -webkit-appearance: none;
+    width: 70px;
+    background: transparent;
+    margin: 0;
+  }
+  input[type=range]:focus { outline: none; }
+  input[type=range]::-webkit-slider-runnable-track {
+    width: 100%;
+    height: 3px;
+    cursor: pointer;
+    background: rgba(233,228,216,0.15);
+    border-radius: 2px;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    height: 11px;
+    width: 11px;
+    border-radius: 50%;
+    background: var(--wood);
+    cursor: pointer;
+    -webkit-appearance: none;
+    margin-top: -4px;
+    transition: transform 0.1s ease;
+  }
+  input[type=range]::-webkit-slider-thumb:hover {
+    transform: scale(1.2);
+  }
+
+  .resetBtn{
     background:rgba(14,12,10,0.8);
     backdrop-filter: blur(4px);
     border:1px solid rgba(233,228,216,0.24);
@@ -204,6 +265,7 @@
     padding:7px 12px;
     cursor:pointer;
     border-radius:2px;
+    height: 100%;
   }
   .resetBtn:hover{ border-color:var(--wood); color:var(--wood); }
 
@@ -230,7 +292,7 @@
     flex-wrap:wrap;
     justify-content:center;
     gap:5px;
-    max-width:600px;
+    max-width:680px;
   }
   .chip{
     display:flex; align-items:center; gap:0;
@@ -254,7 +316,7 @@
 
   .hint{
     position:absolute;
-    bottom:85px; left:0; right:0;
+    bottom:95px; left:0; right:0;
     text-align:center;
     z-index:14;
     color:var(--string-dim);
@@ -294,18 +356,24 @@
     </div>
   </div>
 
-  <button class="resetBtn" id="resetBtn">Reset</button>
+  <div class="controls">
+    <div class="card">
+      <div class="k">Volume <span id="volVal" class="val">80</span></div>
+      <input type="range" id="volumeSlider" min="0" max="100" value="80">
+    </div>
+    <button class="resetBtn" id="resetBtn">Reset</button>
+  </div>
 
   <div class="hint" id="hint">Point your index finger at a segment to ring that chord — close your hand to mute</div>
 
   <div class="strip">
-    <div class="label">Chords on the wheel — tap to add or remove (2–8)</div>
+    <div class="label">Chords on the wheel — tap to add or remove (2 to 12)</div>
     <div class="picker" id="picker"></div>
   </div>
 
   <div class="gate" id="gate">
     <h1>Play chords with <em>your hand</em></h1>
-    <p>Turns your camera into a strummable chord wheel. Point your index finger to select a chord, open your hand to strum, and close it to mute.</p>
+    <p>Turns your camera into a lush, studio-quality chord pad. Point your index finger to select a chord, open your hand to strum, and close it to mute.</p>
     <button id="startBtn">Enable camera &amp; sound</button>
     <div class="err" id="gateErr"></div>
   </div>
@@ -316,6 +384,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
 
 <script>
+// Extended chord library with rich voicings
 const CHORD_LIBRARY = {
   "A":    ["A2","E3","A3","C#4","E4"],
   "Am":   ["A2","E3","A3","C4","E4"],
@@ -325,46 +394,75 @@ const CHORD_LIBRARY = {
   "Dm":   ["D3","A3","D4","F4"],
   "G":    ["G2","B2","D3","G3","B3","G4"],
   "C":    ["C3","E3","G3","C4","E4"],
-  "F#m":  ["F#2","C#3","F#3","A3","C#4","F#4"],
+  "F":    ["F2","C3","F3","A3","C4","F4"],
   "Bm":   ["B2","F#3","B3","D4","F#4"],
+  "F#m":  ["F#2","C#3","F#3","A3","C#4","F#4"],
+  "C#m":  ["C#3","G#3","C#4","E4","G#4"]
 };
 
-let wheelChords = ["A", "F#m", "D", "E"];
+let wheelChords = ["A", "C#m", "F#m", "D", "E", "Bm", "G", "C"];
 
 let synth = null;
+let masterGain = null;
 let currentHeldChord = null;
 
 async function initAudio(){
-  // Lush warm chorus, filter and reverb setup for rich acoustic guitar pad body
-  const filter = new Tone.Filter({ frequency: 3200, type: "lowpass" });
-  const chorus = new Tone.Chorus({ frequency: 1.5, delayTime: 3.5, depth: 0.5, wet: 0.25 }).start();
-  const reverb = new Tone.Reverb({ decay: 2.8, preDelay: 0.01, wet: 0.35 });
-  await reverb.ready;
-  const comp = new Tone.Compressor(-12, 3);
+  // Main volume control node
+  masterGain = new Tone.Gain(0.8).toDestination();
 
+  // HIGH-QUALITY STUDIO PAD SETUP
+  const filter = new Tone.Filter({ frequency: 1800, type: "lowpass", rolloff: -12 });
+  const chorus = new Tone.Chorus({ frequency: 0.4, delayTime: 2.5, depth: 0.6, wet: 0.4 }).start();
+  const reverb = new Tone.Reverb({ decay: 4.5, preDelay: 0.02, wet: 0.5 });
+  await reverb.ready;
+  
+  const comp = new Tone.Compressor(-14, 3);
+
+  // Chain it all together, sending final output to our masterGain instead of destination directly
   comp.connect(chorus);
   chorus.connect(filter);
   filter.connect(reverb);
-  reverb.toDestination();
+  reverb.connect(masterGain);
 
-  // PolySynth configured for rich, organic sustained chords without clicking
   synth = new Tone.PolySynth(Tone.Synth, {
-    oscillator: { type: "triangle8" },
-    envelope: { attack: 0.05, decay: 0.2, sustain: 0.9, release: 0.5 }
+    oscillator: { 
+      type: "fattriangle", 
+      count: 3, 
+      spread: 15 
+    },
+    envelope: { 
+      attack: 0.08,
+      decay: 0.3, 
+      sustain: 0.85, 
+      release: 1.2
+    }
   });
-  synth.volume.value = -10;
+  
+  synth.volume.value = -7;
   synth.connect(comp);
 }
 
+// Volume Slider Event Listener
+const volumeSlider = document.getElementById('volumeSlider');
+const volVal = document.getElementById('volVal');
+
+volumeSlider.addEventListener('input', (e) => {
+  const val = parseInt(e.target.value, 10);
+  volVal.textContent = val;
+  if (masterGain) {
+    // Convert 0-100 scale to 0.0-1.0 amplitude scale smoothly over 0.1 seconds
+    masterGain.gain.rampTo(val / 100, 0.1);
+  }
+});
+
 function playChord(chordName){
   if(!synth || !CHORD_LIBRARY[chordName]) return;
-  if(currentHeldChord === chordName) return; // Already playing this chord, don't interrupt!
+  if(currentHeldChord === chordName) return; 
 
   const notes = CHORD_LIBRARY[chordName];
   const now = Tone.now();
 
   if(currentHeldChord){
-    // Smooth legato transition to new chord notes without cutting out abruptly
     synth.releaseAll(now);
   }
 
@@ -442,7 +540,6 @@ function segmentForAngle(angleDeg, count, currentActive){
     const centerDeg = 90 - i * (360 / count);
     let diff = Math.abs((angleDeg - centerDeg + 540) % 360 - 180);
     
-    // Generous hysteresis deadzone to prevent flickering when sliding across borders
     if(i === currentActive) diff -= 8;
 
     if(diff < minDiff){
@@ -562,10 +659,11 @@ function drawFrame(){
     ctx.stroke();
 
     const labelRad = -centerDeg * Math.PI / 180;
-    const lx = Math.cos(labelRad) * R * 0.62;
-    const ly = Math.sin(labelRad) * R * 0.62;
+    const distFactor = count > 6 ? 0.68 : 0.62;
+    const lx = Math.cos(labelRad) * R * distFactor;
+    const ly = Math.sin(labelRad) * R * distFactor;
     ctx.fillStyle = isActive ? "#f2d9b8" : "rgba(233,228,216,0.75)";
-    ctx.font = (isMobile ? "600 16px" : "600 20px") + " 'Fraunces', serif";
+    ctx.font = (isMobile ? "600 13px" : "600 16px") + " 'Fraunces', serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText(wheelChords[i], lx, ly);
@@ -623,7 +721,7 @@ function drawFrame(){
 }
 
 const MIN_CHORDS = 2;
-const MAX_CHORDS = 8;
+const MAX_CHORDS = 12;
 
 function buildPicker(){
   const picker = document.getElementById('picker');
@@ -652,7 +750,7 @@ function toggleChord(name){
 }
 
 document.getElementById('resetBtn').addEventListener('click', () => {
-  wheelChords = ["A", "F#m", "D", "E"];
+  wheelChords = ["A", "C#m", "F#m", "D", "E", "Bm", "G", "C"];
   activeSegment = -1;
   stopChord();
   buildPicker();
@@ -665,6 +763,9 @@ document.getElementById('startBtn').addEventListener('click', async () => {
     setupMediaPipe();
     await Tone.start();
     await initAudio();
+    
+    // Ensure the volume slider state matches audio engine on start
+    masterGain.gain.value = parseInt(volumeSlider.value, 10) / 100;
 
     const camera = new Camera(video, {
       onFrame: async () => {
