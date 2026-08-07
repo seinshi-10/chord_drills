@@ -1,791 +1,1388 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Chord Wheel — play guitar chords with your hand</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,500;9..144,600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>Chord Drills — hand-tracked guitar chord practice</title>
+
+<!-- MediaPipe -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
 <style>
+  /* =========================================================
+     APPLE-STYLE DARK PALETTE
+     Modeled on macOS/iOS dark mode system colors & materials.
+  ========================================================= */
   :root{
-    --ink:#0e0c0a;
-    --panel:#171310;
-    --wood:#c98a4b;
-    --wood-dim:#7a5730;
-    --string:#e9e4d8;
-    --string-dim:#8a8478;
-    --ember:#e0562f;
-    --ok:#7fae6a;
+    --bg:            #000000;
+    --surface:       #1c1c1e;   /* systemGray6 dark */
+    --surface-2:     #2c2c2e;   /* systemGray5 dark */
+    --surface-3:     #3a3a3c;   /* systemGray4 dark */
+    --hairline:      rgba(255,255,255,0.09);
+    --text:          #f5f5f7;
+    --text-dim:      #98989d;   /* systemGray */
+    --text-faint:    #636366;
+
+    --blue:          #0a84ff;   /* systemBlue */
+    --green:         #32d74b;   /* systemGreen */
+    --red:           #ff453a;   /* systemRed */
+    --yellow:        #ffd60a;   /* systemYellow */
+    --purple:        #bf5af2;   /* systemPurple */
+
+    --radius-lg: 20px;
+    --radius-md: 14px;
+    --radius-sm: 10px;
+
+    --font: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text",
+            "Inter", "Helvetica Neue", Arial, sans-serif;
+    --font-mono: "SF Mono", "Menlo", ui-monospace, "JetBrains Mono", monospace;
   }
-  *{box-sizing:border-box;}
-  html,body{
-    margin:0;
-    height:100%;
-    background:var(--ink);
-    color:var(--string);
-    font-family:'JetBrains Mono', monospace;
-    overflow:hidden;
+
+  *{ box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html,body{ margin:0; padding:0; }
+  body{
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font);
+    min-height: 100vh;
+    overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
   }
+  ::selection{ background: var(--blue); color:#fff; }
+  button{ font-family: inherit; }
+  :focus-visible{ outline: 2px solid var(--blue); outline-offset: 2px; border-radius: 6px; }
+
+  @media (prefers-reduced-motion: reduce){
+    *{ animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+  }
+
+  /* ---------- layout shell ---------- */
   .app{
-    position:relative;
-    width:100vw;
-    height:100vh;
-    display:flex;
-    align-items:center;
-    justify-content:center;
-  }
-
-  /* ---------- Title bar ---------- */
-  .title{
-    position:absolute;
-    top:0; left:0; right:0;
-    z-index:20;
-    display:flex;
-    align-items:baseline;
-    justify-content:space-between;
-    padding:14px 20px;
-    pointer-events:none;
-  }
-  .title h1{
-    font-family:'Fraunces', serif;
-    font-weight:500;
-    font-size:18px;
-    letter-spacing:0.01em;
-    margin:0;
-    color:var(--string);
-  }
-  .title h1 span{ color:var(--wood); font-style:italic; font-weight:300; }
-  .title .tag{
-    font-size:10px;
-    letter-spacing:0.12em;
-    text-transform:uppercase;
-    color:var(--string-dim);
-  }
-
-  /* ---------- Stage (video + canvas) ---------- */
-  .stage{
-    position:relative;
-    width:100%;
-    height:100%;
-    background:#000;
-  }
-  video{
-    position:absolute;
-    inset:0;
-    width:100%;
-    height:100%;
-    object-fit:cover;
-    transform:scaleX(-1);
-    filter: saturate(0.85) contrast(1.03) brightness(0.92);
-  }
-  canvas{
-    position:absolute;
-    inset:0;
-    width:100%;
-    height:100%;
-  }
-
-  .vignette{
-    position:absolute; inset:0;
-    background:radial-gradient(ellipse at center, rgba(14,12,10,0) 45%, rgba(14,12,10,0.55) 100%);
-    pointer-events:none;
-  }
-
-  /* ---------- Start overlay ---------- */
-  .gate{
-    position:absolute; inset:0;
-    z-index:30;
-    display:flex;
-    flex-direction:column;
-    align-items:center;
-    justify-content:center;
-    gap:16px;
-    background:
-      radial-gradient(ellipse at 50% 40%, rgba(201,138,75,0.10), transparent 60%),
-      var(--ink);
-    text-align:center;
-    padding:20px;
-  }
-  .gate h1{
-    font-family:'Fraunces', serif;
-    font-weight:500;
-    font-size:28px;
-    margin:0;
-  }
-  .gate h1 em{ color:var(--wood); font-style:italic; }
-  .gate p{
-    max-width:380px;
-    color:var(--string-dim);
-    font-size:12px;
-    line-height:1.6;
-    margin:0;
-  }
-  .gate button{
-    margin-top:8px;
-    background:var(--wood);
-    color:#1a1209;
-    border:none;
-    padding:12px 22px;
-    font-family:'JetBrains Mono', monospace;
-    font-weight:700;
-    font-size:12px;
-    letter-spacing:0.06em;
-    text-transform:uppercase;
-    border-radius:2px;
-    cursor:pointer;
-    transition:transform .15s ease, background .15s ease;
-  }
-  .gate button:hover{ background:#dda05f; transform:translateY(-1px); }
-  .gate .err{ color:#e07a5f; font-size:11px; max-width:380px; }
-
-  /* Mobile Orientation Notice */
-  .orientation-warn {
-    display: none;
-    position: absolute;
-    top: 8px;
-    left: 50%;
-    transform: translateX(-50%);
-    background: rgba(224, 86, 47, 0.85);
-    color: #fff;
-    font-size: 9px;
-    padding: 3px 8px;
-    z-index: 25;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    border-radius: 2px;
-    pointer-events: none;
-  }
-  @media (orientation: portrait) {
-    .orientation-warn { display: block; }
-  }
-
-  /* ---------- HUD ---------- */
-  .hud{
-    position:absolute;
-    top:54px; left:20px;
-    z-index:15;
-    display:flex;
-    gap:8px;
-  }
-  .hud .card{
-    background:rgba(14,12,10,0.8);
-    backdrop-filter: blur(4px);
-    border:1px solid rgba(233,228,216,0.14);
-    padding:6px 10px;
-    min-width:70px;
-    border-radius:2px;
-  }
-  .hud .card .k{
-    font-size:8px;
-    letter-spacing:0.14em;
-    text-transform:uppercase;
-    color:var(--string-dim);
-    margin-bottom:2px;
-  }
-  .hud .card .v{
-    font-size:15px;
-    font-weight:700;
-    color:var(--wood);
-  }
-  .hud .card .v.idle{ color:var(--string-dim); font-weight:400; }
-
-  /* ---------- Controls (Volume & Reset) ---------- */
-  .controls {
-    position:absolute;
-    top:54px; right:20px;
-    z-index:15;
-    display:flex;
-    gap:8px;
-  }
-  .controls .card{
-    background:rgba(14,12,10,0.8);
-    backdrop-filter: blur(4px);
-    border:1px solid rgba(233,228,216,0.14);
-    padding:6px 10px;
-    border-radius:2px;
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 16px 16px 48px;
     display: flex;
     flex-direction: column;
-    justify-content: center;
-    gap: 6px;
-  }
-  .controls .card .k {
-    font-size:8px;
-    letter-spacing:0.14em;
-    text-transform:uppercase;
-    color:var(--string-dim);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    width: 70px;
-  }
-  .controls .card .k .val {
-    color: var(--wood);
-    font-weight: 700;
-    font-size: 10px;
+    gap: 14px;
   }
 
-  /* Custom Range Slider Styling */
-  input[type=range] {
-    -webkit-appearance: none;
-    width: 70px;
-    background: transparent;
+  /* ---------- top bar (translucent toolbar) ---------- */
+  .topbar{
+    position: sticky; top: 10px; z-index: 20;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    flex-wrap: wrap;
+    gap: 14px;
+    padding: 12px 18px;
+    background: rgba(28,28,30,0.72);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-lg);
+  }
+  .brand{ display:flex; align-items:center; gap:10px; }
+  .brand .glyph{
+    width: 30px; height: 30px;
+    border-radius: 9px;
+    background: linear-gradient(160deg, var(--blue), #5e5ce6);
+    display:flex; align-items:center; justify-content:center;
+    flex: none;
+    font-size: 15px;
+  }
+  .brand h1{
+    font-size: 17px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
     margin: 0;
   }
-  input[type=range]:focus { outline: none; }
-  input[type=range]::-webkit-slider-runnable-track {
-    width: 100%;
-    height: 3px;
-    cursor: pointer;
-    background: rgba(233,228,216,0.15);
-    border-radius: 2px;
-  }
-  input[type=range]::-webkit-slider-thumb {
-    height: 11px;
-    width: 11px;
-    border-radius: 50%;
-    background: var(--wood);
-    cursor: pointer;
-    -webkit-appearance: none;
-    margin-top: -4px;
-    transition: transform 0.1s ease;
-  }
-  input[type=range]::-webkit-slider-thumb:hover {
-    transform: scale(1.2);
+  .brand small{
+    display:block;
+    color: var(--text-dim);
+    font-size: 11px;
+    margin-top: 1px;
   }
 
-  .resetBtn{
-    background:rgba(14,12,10,0.8);
-    backdrop-filter: blur(4px);
-    border:1px solid rgba(233,228,216,0.24);
-    color:var(--string);
-    font-family:'JetBrains Mono', monospace;
-    font-size:10px;
-    letter-spacing:0.08em;
-    text-transform:uppercase;
-    padding:7px 12px;
+  .topbar-controls{ display:flex; align-items:center; gap: 20px; flex-wrap: wrap; }
+  .bpm-control{ display:flex; flex-direction:column; gap:5px; min-width: 130px; }
+  .bpm-control .label-row{ display:flex; justify-content:space-between; font-size:11px; color:var(--text-dim); }
+  .bpm-control .label-row span.val{ color: var(--text); font-variant-numeric: tabular-nums; }
+  input[type=range]{
+    -webkit-appearance:none; appearance:none;
+    width:100%; height:4px; border-radius:4px;
+    background: var(--surface-3);
+    outline:none;
+  }
+  input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none;
+    width:16px; height:16px; border-radius:50%;
+    background: #fff;
+    box-shadow: 0 1px 3px rgba(0,0,0,.4);
     cursor:pointer;
-    border-radius:2px;
-    height: 100%;
   }
-  .resetBtn:hover{ border-color:var(--wood); color:var(--wood); }
+  input[type=range]::-moz-range-thumb{
+    width:16px; height:16px; border-radius:50%; background:#fff; border:none;
+  }
 
-  /* ---------- Bottom strip: chord picker ---------- */
-  .strip{
-    position:absolute;
-    left:0; right:0; bottom:0;
-    z-index:15;
-    display:flex;
-    flex-direction:column;
-    align-items:center;
-    gap:6px;
-    padding:8px 16px 14px;
-    background:linear-gradient(to top, rgba(14,12,10,0.95) 60%, transparent);
+  .btn{
+    border: none;
+    background: var(--surface-2);
+    color: var(--text);
+    padding: 10px 18px;
+    border-radius: 980px; /* pill */
+    font-weight: 590;
+    font-size: 14px;
+    letter-spacing: -0.01em;
+    cursor: pointer;
+    transition: transform .08s ease, background .15s ease, opacity .15s ease;
   }
-  .strip .label{
-    font-size:9px;
-    letter-spacing:0.12em;
-    text-transform:uppercase;
-    color:var(--string-dim);
-  }
-  .picker{
-    display:flex;
-    flex-wrap:wrap;
-    justify-content:center;
-    gap:5px;
-    max-width:680px;
-  }
-  .chip{
-    display:flex; align-items:center; gap:0;
-    background:rgba(17,15,13,0.85);
-    border:1px solid rgba(233,228,216,0.16);
-    padding:4px 9px;
-    font-size:11px;
-    font-weight:500;
-    cursor:pointer;
-    user-select:none;
-    color:var(--string-dim);
-    transition:border-color .12s ease, color .12s ease, background .12s ease;
-  }
-  .chip:hover{ border-color:rgba(233,228,216,0.4); color:var(--string); }
-  .chip.active{
-    border-color:var(--wood);
-    color:var(--wood);
-    background:rgba(201,138,75,0.14);
-  }
-  .chip .n{ font-family:'Fraunces', serif; font-size:12px; }
+  .btn:hover{ background: var(--surface-3); }
+  .btn:active{ transform: scale(0.96); }
+  .btn.primary{ background: var(--blue); color: #fff; }
+  .btn.primary:hover{ background: #2f95ff; }
+  .btn.primary.stop{ background: var(--red); }
+  .btn.primary.stop:hover{ background: #ff5c52; }
+  .btn.ghost{ background: transparent; border: 1px solid var(--hairline); }
+  .btn:disabled{ opacity:.4; cursor:not-allowed; transform:none; }
 
-  .hint{
-    position:absolute;
-    bottom:95px; left:0; right:0;
+  .score-display{ display:flex; gap: 22px; align-items:center; }
+  .score-display .metric{ text-align:right; }
+  .score-display .metric .n{ font-size: 20px; font-weight:600; font-variant-numeric: tabular-nums; line-height:1; }
+  .score-display .metric .l{ font-size: 10px; color: var(--text-dim); margin-top: 2px; }
+
+  /* ---------- mode selector (segmented control) ---------- */
+  .mode-row{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; justify-content:space-between; }
+  .mode-tabs{
+    display:flex; gap:2px;
+    background: var(--surface);
+    border-radius: 11px;
+    padding: 2px;
+  }
+  .mode-tabs button{
+    border:none; background:transparent; color: var(--text-dim);
+    padding: 8px 16px; border-radius:9px; font-size:13px; font-weight:590;
+    cursor:pointer; transition: all .18s ease;
+  }
+  .mode-tabs button.active{ background: var(--surface-3); color: var(--text); }
+
+  .song-select{ display:flex; gap:8px; align-items:center; }
+  select, .text-input{
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    color: var(--text);
+    padding: 9px 12px;
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+  }
+  select:focus, .text-input:focus{ border-color: var(--blue); }
+
+  /* ---------- main grid ---------- */
+  .stage{ display:grid; grid-template-columns: 1fr 300px; gap: 14px; align-items:start; }
+  @media (max-width: 880px){ .stage{ grid-template-columns: 1fr; } }
+
+  .wheel-panel{
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-lg);
+    padding: 24px 20px;
+    display:flex; flex-direction:column; align-items:center; gap: 18px;
+    position: relative;
+  }
+
+  .target-readout{ display:flex; align-items:center; gap: 22px; flex-wrap:wrap; justify-content:center; width:100%; }
+  .target-chord{
+    font-size: 56px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    min-width: 110px;
     text-align:center;
-    z-index:14;
-    color:var(--string-dim);
-    font-size:10px;
-    letter-spacing:0.05em;
-    pointer-events:none;
-    text-shadow: 0 2px 4px rgba(0,0,0,0.8);
-    padding: 0 10px;
+    color: var(--text);
+    transition: color .2s ease;
   }
-  .hidden{ display:none !important; }
+  .target-chord.pulse{ color: var(--blue); }
+  .target-chord.idle{ font-size: 24px; font-weight: 590; color: var(--text-dim); }
+
+  .stat-cluster{ display:flex; gap: 20px; }
+  .stat-cluster .stat{ text-align:center; }
+  .stat-cluster .stat .n{ font-size:19px; font-weight:600; font-variant-numeric: tabular-nums; }
+  .stat-cluster .stat .l{ font-size:10px; color:var(--text-dim); margin-top: 2px; }
+  .stat-cluster .stat.streak .n{ color: var(--yellow); }
+  .stat-cluster .stat.acc .n{ color: var(--blue); }
+
+  .wheel-wrap{ position: relative; width: min(70vw, 420px); max-width: 420px; aspect-ratio: 1/1; }
+  .wheel-wrap svg{ width:100%; height:100%; overflow: visible; }
+
+  .wheel-seg{
+    fill: var(--surface-2);
+    stroke: var(--bg);
+    stroke-width: 3;
+    transition: fill .18s ease, stroke .12s ease, stroke-width .12s ease;
+    cursor: pointer;
+  }
+  .wheel-seg:hover{ fill: var(--surface-3); }
+
+  /* hovered = distinct ring, independent of fill state below */
+  .wheel-seg.hovered{ stroke: #ffffff; stroke-width: 3; }
+
+  /* target = calm persistent glow, pulses gently */
+  .wheel-seg.target{ fill: rgba(10,132,255,0.22); animation: targetPulse 1s ease-in-out infinite; }
+  @keyframes targetPulse{
+    0%, 100% { fill: rgba(10,132,255,0.16); }
+    50%      { fill: rgba(10,132,255,0.34); }
+  }
+  .wheel-seg.target.beat{ fill: rgba(255,214,10,0.4); }
+
+  .wheel-seg.correct{ fill: var(--green) !important; animation: none; }
+  .wheel-seg.wrong{ fill: var(--red) !important; animation: none; }
+
+  .wheel-label{
+    font-family: var(--font);
+    font-weight: 600;
+    font-size: 19px;
+    fill: var(--text);
+    text-anchor: middle;
+    dominant-baseline: middle;
+    pointer-events: none;
+    user-select: none;
+  }
+  .wheel-sub{
+    font-family: var(--font-mono);
+    font-size: 8.5px;
+    fill: var(--text-faint);
+    text-anchor: middle;
+    pointer-events: none;
+    user-select: none;
+    opacity: 0;
+    transition: opacity .15s ease;
+  }
+  .wheel-seg.hovered ~ .wheel-sub, .wheel-sub.show{ opacity: 1; }
+
+  .wheel-center{ fill: var(--bg); stroke: var(--hairline); stroke-width: 1; }
+  .wheel-center-label{
+    font-family: var(--font);
+    font-size: 11px;
+    font-weight: 590;
+    fill: var(--text-faint);
+    text-anchor: middle;
+    dominant-baseline: middle;
+    pointer-events: none;
+  }
+
+  .hand-cursor{
+    position:absolute;
+    width: 14px; height:14px;
+    border-radius:50%;
+    background: var(--blue);
+    box-shadow: 0 0 0 4px rgba(10,132,255,0.25);
+    transform: translate(-50%,-50%);
+    pointer-events:none;
+    transition: left .06s linear, top .06s linear, background .12s ease, box-shadow .12s ease;
+    display:none;
+    z-index: 5;
+  }
+  .hand-cursor.open{ background: var(--yellow); box-shadow: 0 0 0 5px rgba(255,214,10,0.3); }
+
+  .status-text{
+    min-height: 18px;
+    font-size: 13px;
+    color: var(--text-dim);
+    text-align:center;
+  }
+  .status-text.good{ color: var(--blue); }
+  .status-text.perfect{ color: var(--yellow); }
+  .status-text.bad{ color: var(--red); }
+
+  .prog-list{ display:flex; flex-wrap:wrap; gap: 6px; justify-content:center; }
+  .prog-chip{
+    font-size: 12px;
+    background: var(--surface-2);
+    color: var(--text-dim);
+    padding: 5px 11px;
+    border-radius: 20px;
+  }
+  .prog-chip.current{ color: #fff; background: var(--blue); font-weight:600; }
+  .prog-chip.done{ color: var(--text-faint); opacity: .5; text-decoration: line-through; }
+
+  /* ---------- side panel ---------- */
+  .side-panel{ display:flex; flex-direction:column; gap: 14px; }
+  .card{
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-lg);
+    padding: 16px;
+  }
+  .card h2{
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    margin: 0 0 12px;
+  }
+
+  .cam-wrap{
+    position: relative;
+    width: 100%;
+    aspect-ratio: 4/3;
+    background: var(--surface-2);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+  }
+  .cam-wrap video, .cam-wrap canvas{
+    position:absolute; inset:0;
+    width:100%; height:100%;
+    transform: scaleX(-1);
+    object-fit: cover;
+  }
+  .cam-placeholder{
+    position:absolute; inset:0;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap: 8px;
+    color: var(--text-dim);
+    text-align:center;
+    padding: 16px;
+    z-index: 3;
+  }
+  .cam-placeholder .hand-emoji{ font-size: 30px; opacity: .6; }
+  .cam-placeholder p{ margin:0; font-size: 12px; line-height:1.4; max-width: 200px; }
+  .cam-status{
+    position:absolute; top:8px; left:8px;
+    font-size:10px;
+    color: var(--text-dim);
+    background: rgba(0,0,0,.55);
+    -webkit-backdrop-filter: blur(6px);
+    backdrop-filter: blur(6px);
+    padding: 4px 8px; border-radius: 20px;
+    z-index: 4;
+    display:flex; align-items:center; gap:5px;
+  }
+  .cam-status .dot{ width:6px; height:6px; border-radius:50%; background: var(--text-faint); }
+  .cam-status.live .dot{ background: var(--green); box-shadow: 0 0 5px var(--green); }
+  .cam-status.denied .dot{ background: var(--red); }
+
+  .volume-row{ display:flex; align-items:center; gap:10px; margin-top: 12px; }
+  .volume-row label{ font-size: 11px; color: var(--text-dim); width: 55px; }
+
+  .leaderboard-list{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:6px; }
+  .leaderboard-list li{
+    display:flex; justify-content:space-between; align-items:center;
+    font-size: 13px;
+    color: var(--text-dim);
+    padding: 8px 10px;
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+  }
+  .leaderboard-list li .lb-rank{ color: var(--text-faint); font-size: 11px; width: 16px; }
+  .leaderboard-list li b{ color: var(--text); font-weight: 590; }
+  .leaderboard-list li .lb-score{ color: var(--text); font-weight:600; font-variant-numeric: tabular-nums; }
+  .leaderboard-list li.demo{ opacity: .55; }
+  .leaderboard-list li.demo .lb-score{ color: var(--text-dim); }
+  .leaderboard-hint{ font-size: 11px; color: var(--text-faint); margin-top: 8px; }
+
+  .howto p{ margin:0; font-size: 12.5px; line-height:1.55; color: var(--text-dim); }
+  .howto b{ color: var(--text); font-weight: 590; }
+
+  /* ---------- summary modal ---------- */
+  .overlay{
+    position: fixed; inset:0;
+    background: rgba(0,0,0,.6);
+    -webkit-backdrop-filter: blur(14px);
+    backdrop-filter: blur(14px);
+    display:flex; align-items:center; justify-content:center;
+    z-index: 50; padding: 20px;
+  }
+  .overlay[hidden]{ display:none; }
+  .summary-card{
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-lg);
+    padding: 28px;
+    width: min(400px, 100%);
+    text-align:center;
+  }
+  .summary-card h3{ font-size: 22px; font-weight: 700; margin: 0 0 4px; letter-spacing:-0.01em; }
+  .summary-card .sub{ color: var(--text-dim); font-size:13px; margin-bottom: 20px; }
+  .summary-grid{ display:grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px; }
+  .summary-grid .box{ background: var(--surface-2); border-radius: var(--radius-md); padding: 14px; }
+  .summary-grid .box .n{ font-size: 21px; font-weight:700; font-variant-numeric: tabular-nums; }
+  .summary-grid .box .l{ font-size: 10px; color: var(--text-dim); margin-top:3px; }
+  .name-row{ display:flex; gap:8px; margin-bottom: 14px; }
+  .name-row input{ flex:1; }
+  .summary-actions{ display:flex; gap: 10px; justify-content:center; }
+
+  .footnote{ text-align:center; color: var(--text-faint); font-size: 11px; margin-top: 2px; }
 </style>
 </head>
 <body>
 
 <div class="app">
-  <div class="title">
-    <h1>Chord <span>Wheel</span></h1>
-    <div class="tag">right hand · webcam</div>
-  </div>
 
-  <div class="orientation-warn">For best results, rotate device to landscape</div>
-
-  <div class="stage" id="stage">
-    <video id="video" autoplay playsinline muted></video>
-    <canvas id="overlay"></canvas>
-    <div class="vignette"></div>
-  </div>
-
-  <div class="hud">
-    <div class="card">
-      <div class="k">Chord</div>
-      <div class="v idle" id="hudChord">—</div>
+  <!-- TOP BAR -->
+  <header class="topbar">
+    <div class="brand">
+      <span class="glyph" aria-hidden="true">🎸</span>
+      <div>
+        <h1>Chord Drills</h1>
+        <small>hand-tracked chord trainer</small>
+      </div>
     </div>
-    <div class="card">
-      <div class="k">Hand</div>
-      <div class="v idle" id="hudHand">searching</div>
+
+    <div class="topbar-controls">
+      <div class="bpm-control">
+        <div class="label-row"><span>Tempo</span><span class="val"><span id="bpmVal">80</span> BPM</span></div>
+        <input type="range" id="bpmSlider" min="40" max="120" value="80" />
+      </div>
+
+      <div class="volume-row" style="margin-top:0;">
+        <label for="volSlider">Volume</label>
+        <input type="range" id="volSlider" min="0" max="100" value="70" style="width:90px;" />
+      </div>
+
+      <button class="btn primary" id="startStopBtn">Start Freestyle</button>
+    </div>
+
+    <div class="score-display">
+      <div class="metric"><div class="n" id="scoreVal">0</div><div class="l">Score</div></div>
+      <div class="metric"><div class="n" id="timeVal">0.0s</div><div class="l">Timer</div></div>
+    </div>
+  </header>
+
+  <!-- MODE ROW -->
+  <div class="mode-row">
+    <div class="mode-tabs" role="tablist" aria-label="Mode">
+      <button class="active" data-mode="freestyle" role="tab" aria-selected="true">Freestyle</button>
+      <button data-mode="drill" role="tab" aria-selected="false">Drills</button>
+      <button data-mode="song" role="tab" aria-selected="false">Song Mode</button>
+    </div>
+
+    <div class="song-select" id="songSelectWrap" hidden>
+      <select id="songPreset">
+        <option value="wonderwall">Wonderwall — Em G D A</option>
+        <option value="horse">Horse With No Name — Em D</option>
+        <option value="letitbe">Let It Be — C G Am F</option>
+        <option value="knockin">Knockin' on Heaven's Door — G D Am</option>
+        <option value="custom">Custom…</option>
+      </select>
+      <input type="text" class="text-input" id="customProg" placeholder="G, C, D, Em" hidden style="width:150px;" />
     </div>
   </div>
 
-  <div class="controls">
-    <div class="card">
-      <div class="k">Volume <span id="volVal" class="val">80</span></div>
-      <input type="range" id="volumeSlider" min="0" max="100" value="80">
-    </div>
-    <button class="resetBtn" id="resetBtn">Reset</button>
-  </div>
+  <!-- STAGE -->
+  <div class="stage">
 
-  <div class="hint" id="hint">Point your index finger at a segment to ring that chord — close your hand to mute</div>
+    <!-- WHEEL PANEL -->
+    <section class="wheel-panel">
+      <div class="target-readout">
+        <div class="stat-cluster">
+          <div class="stat"><div class="n" id="reactionVal">—</div><div class="l">Reaction</div></div>
+        </div>
+        <div class="target-chord idle" id="targetChord">Ready</div>
+        <div class="stat-cluster">
+          <div class="stat streak"><div class="n" id="streakVal">0</div><div class="l">Streak</div></div>
+          <div class="stat acc"><div class="n" id="accVal">—</div><div class="l">Accuracy</div></div>
+        </div>
+      </div>
 
-  <div class="strip">
-    <div class="label">Chords on the wheel — tap to add or remove (2 to 12)</div>
-    <div class="picker" id="picker"></div>
-  </div>
+      <div class="wheel-wrap" id="wheelWrap">
+        <svg id="wheelSvg" viewBox="0 0 480 480"></svg>
+        <div class="hand-cursor" id="handCursor"></div>
+      </div>
 
-  <div class="gate" id="gate">
-    <h1>Play chords with <em>your hand</em></h1>
-    <p>Turns your camera into a lush, studio-quality chord pad. Point your index finger to select a chord, open your hand to strum, and close it to mute.</p>
-    <button id="startBtn">Enable camera &amp; sound</button>
-    <div class="err" id="gateErr"></div>
+      <div class="status-text" id="statusText">Point your index finger at a chord to hear it, or click a segment.</div>
+
+      <div class="prog-list" id="progList" hidden></div>
+    </section>
+
+    <!-- SIDE PANEL -->
+    <aside class="side-panel">
+      <div class="card">
+        <h2>Webcam</h2>
+        <div class="cam-wrap">
+          <video id="inputVideo" playsinline></video>
+          <canvas id="overlayCanvas"></canvas>
+          <div class="cam-placeholder" id="camPlaceholder">
+            <span class="hand-emoji">✋</span>
+            <p>Camera off — click Enable to point at chords with your hand</p>
+          </div>
+          <div class="cam-status" id="camStatus"><span class="dot"></span>off</div>
+        </div>
+        <button class="btn ghost" id="camToggleBtn" style="width:100%; margin-top:10px;">Enable Camera</button>
+      </div>
+
+      <div class="card">
+        <h2>Leaderboard</h2>
+        <ul class="leaderboard-list" id="leaderboardList"></ul>
+        <div class="leaderboard-hint" id="leaderboardHint">Finish a drill to add your score.</div>
+      </div>
+
+      <div class="card howto">
+        <h2>How to play</h2>
+        <p>Point your <b>index finger</b> at the highlighted segment, then <b>open your hand</b> to strum
+        and confirm. <b>Closing your hand</b> cancels the pick. No camera? Click a segment instead.</p>
+      </div>
+    </aside>
+
   </div>
 </div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+<!-- SUMMARY MODAL -->
+<div class="overlay" id="summaryOverlay" hidden>
+  <div class="summary-card">
+    <h3 id="summaryTitle">Drill complete</h3>
+    <div class="sub">Nice work — here's how it went.</div>
+    <div class="summary-grid">
+      <div class="box"><div class="n" id="sumScore">0</div><div class="l">Score</div></div>
+      <div class="box"><div class="n" id="sumAcc">0%</div><div class="l">Accuracy</div></div>
+      <div class="box"><div class="n" id="sumReact">0ms</div><div class="l">Avg reaction</div></div>
+      <div class="box"><div class="n" id="sumBest">0</div><div class="l">Best score</div></div>
+    </div>
+    <div class="name-row">
+      <input type="text" class="text-input" id="playerNameInput" placeholder="Name for leaderboard (optional)" style="width:100%;" maxlength="16" />
+    </div>
+    <div class="summary-actions">
+      <button class="btn ghost" id="closeSummaryBtn">Close</button>
+      <button class="btn primary" id="submitScoreBtn">Submit score</button>
+    </div>
+  </div>
+</div>
 
 <script>
-// Extended chord library with rich voicings
-const CHORD_LIBRARY = {
-  "A":    ["A2","E3","A3","C#4","E4"],
-  "Am":   ["A2","E3","A3","C4","E4"],
-  "E":    ["E2","B2","E3","G#3","B3","E4"],
-  "Em":   ["E2","B2","E3","G3","B3","E4"],
-  "D":    ["D3","A3","D4","F#4"],
-  "Dm":   ["D3","A3","D4","F4"],
-  "G":    ["G2","B2","D3","G3","B3","G4"],
-  "C":    ["C3","E3","G3","C4","E4"],
-  "F":    ["F2","C3","F3","A3","C4","F4"],
-  "Bm":   ["B2","F#3","B3","D4","F#4"],
-  "F#m":  ["F#2","C#3","F#3","A3","C#4","F#4"],
-  "C#m":  ["C#3","G#3","C#4","E4","G#4"]
-};
+(() => {
+  "use strict";
 
-let wheelChords = ["A", "C#m", "F#m", "D", "E", "Bm", "G", "C"];
+  /* =========================================================
+     CONFIG
+  ========================================================= */
+  const WORKER_URL = "https://chord-drills-leaderboard.YOUR-SUBDOMAIN.workers.dev";
+  // ^ replace with your deployed Cloudflare Worker URL (see worker.js)
 
-let synth = null;
-let masterGain = null;
-let currentHeldChord = null;
+  const STORAGE_KEY = "chordDrills.bestScores.v1";
+  const SEGMENTS = 10;
+  const SEG_ANGLE = 360 / SEGMENTS;
+  const OUTER_R = 220, INNER_R = 92;
+  const CENTER = { x: 240, y: 240 };
 
-async function initAudio(){
-  // Main volume control node
-  masterGain = new Tone.Gain(0.8).toDestination();
+  const DEMO_LEADERBOARD = [
+    { name: "Ghost run", score: 650, mode: "drill", demo: true },
+  ];
 
-  // HIGH-QUALITY STUDIO PAD SETUP
-  const filter = new Tone.Filter({ frequency: 1800, type: "lowpass", rolloff: -12 });
-  const chorus = new Tone.Chorus({ frequency: 0.4, delayTime: 2.5, depth: 0.6, wet: 0.4 }).start();
-  const reverb = new Tone.Reverb({ decay: 4.5, preDelay: 0.02, wet: 0.5 });
-  await reverb.ready;
-  
-  const comp = new Tone.Compressor(-14, 3);
+  /* =========================================================
+     CHORD DATA
+     Fret numbers per string (low E, A, D, G, B, high e). -1 = muted.
+  ========================================================= */
+  const OPEN_FREQ = [82.41, 110.00, 146.83, 196.00, 246.94, 329.63]; // E A D G B e
 
-  // Chain it all together, sending final output to our masterGain instead of destination directly
-  comp.connect(chorus);
-  chorus.connect(filter);
-  filter.connect(reverb);
-  reverb.connect(masterGain);
+  function fretFreq(openHz, fret) {
+    if (fret < 0) return 0;
+    return +(openHz * Math.pow(2, fret / 12)).toFixed(3);
+  }
 
-  synth = new Tone.PolySynth(Tone.Synth, {
-    oscillator: { 
-      type: "fattriangle", 
-      count: 3, 
-      spread: 15 
-    },
-    envelope: { 
-      attack: 0.08,
-      decay: 0.3, 
-      sustain: 0.85, 
-      release: 1.2
+  const CHORD_DEFS = [
+    { name: "G",  frets: [3, 2, 0, 0, 3, 3] },
+    { name: "C",  frets: [-1, 3, 2, 0, 1, 0] },
+    { name: "D",  frets: [-1, -1, 0, 2, 3, 2] },
+    { name: "Em", frets: [0, 2, 2, 0, 0, 0] },
+    { name: "Am", frets: [-1, 0, 2, 2, 1, 0] },
+    { name: "E",  frets: [0, 2, 2, 1, 0, 0] },
+    { name: "A",  frets: [-1, 0, 2, 2, 2, 0] },
+    { name: "Dm", frets: [-1, -1, 0, 2, 3, 1] },
+    { name: "F",  frets: [-1, -1, 3, 2, 1, 1] },
+    { name: "Bm", frets: [-1, 2, 4, 4, 3, 2] },
+  ];
+
+  const CHORDS = CHORD_DEFS.map((c, i) => ({
+    ...c,
+    index: i,
+    notes: c.frets.map((f, si) => fretFreq(OPEN_FREQ[si], f)),
+    diagram: c.frets.map(f => (f < 0 ? "x" : f)).join(" "),
+  }));
+
+  const CHORD_BY_NAME = Object.fromEntries(CHORDS.map(c => [c.name, c]));
+
+  const SONGS = {
+    wonderwall: ["Em", "G", "D", "A"],
+    horse:      ["Em", "D"],
+    letitbe:    ["C", "G", "Am", "F"],
+    knockin:    ["G", "D", "Am"],
+  };
+
+  /* =========================================================
+     GUITAR SYNTHESIS — Karplus-Strong plucked-string model
+     -----------------------------------------------------------
+     Instead of oscillators, each string is a short noise burst
+     fed through a decaying delay-line loop (the classic
+     Karplus-Strong algorithm). This produces the characteristic
+     bright pluck + natural decay of a real plucked string,
+     rather than a synth-y tone. Buffers are cached per
+     frequency since the same open notes recur across chords.
+  ========================================================= */
+  let audioCtx = null;
+  let masterGain = null;
+  let masterFilter = null;
+  const stringBufferCache = new Map();
+
+  function ensureAudio() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      masterGain = audioCtx.createGain();
+      masterGain.gain.value = 0.7;
+      masterFilter = audioCtx.createBiquadFilter();
+      masterFilter.type = "lowpass";
+      masterFilter.frequency.value = 7500; // gentle body warmth, no harsh top end
+      const comp = audioCtx.createDynamicsCompressor();
+      masterFilter.connect(comp);
+      comp.connect(audioCtx.destination);
+      masterGain.connect(masterFilter);
     }
-  });
-  
-  synth.volume.value = -7;
-  synth.connect(comp);
-}
-
-// Volume Slider Event Listener
-const volumeSlider = document.getElementById('volumeSlider');
-const volVal = document.getElementById('volVal');
-
-volumeSlider.addEventListener('input', (e) => {
-  const val = parseInt(e.target.value, 10);
-  volVal.textContent = val;
-  if (masterGain) {
-    // Convert 0-100 scale to 0.0-1.0 amplitude scale smoothly over 0.1 seconds
-    masterGain.gain.rampTo(val / 100, 0.1);
-  }
-});
-
-function playChord(chordName){
-  if(!synth || !CHORD_LIBRARY[chordName]) return;
-  if(currentHeldChord === chordName) return; 
-
-  const notes = CHORD_LIBRARY[chordName];
-  const now = Tone.now();
-
-  if(currentHeldChord){
-    synth.releaseAll(now);
+    if (audioCtx.state === "suspended") audioCtx.resume();
   }
 
-  synth.triggerAttack(notes, now + 0.02);
-  currentHeldChord = chordName;
-}
+  function setVolume(v) { if (masterGain) masterGain.gain.value = v; }
 
-function stopChord(){
-  if(synth && currentHeldChord){
-    synth.releaseAll(Tone.now() + 0.05);
-    currentHeldChord = null;
+  function getStringBuffer(freq, stringIndex) {
+    const key = freq.toFixed(2) + ":" + stringIndex;
+    if (stringBufferCache.has(key)) return stringBufferCache.get(key);
+
+    const sr = audioCtx.sampleRate;
+    const duration = 2.2;
+    const N = Math.max(4, Math.round(sr / freq));
+    // Thicker (bass) strings ring out longer than thin treble strings on a
+    // real guitar; vary the per-loop decay slightly by string index (0=low E).
+    const decay = 0.9935 + stringIndex * 0.0009;
+
+    const buffer = audioCtx.createBuffer(1, Math.floor(sr * duration), sr);
+    const data = buffer.getChannelData(0);
+
+    // Excite the delay line with filtered noise (the "pluck") — a mix of
+    // noise and a touch of triangle-ish bias gives a slightly warmer,
+    // less clicky attack than pure white noise.
+    const ring = new Float32Array(N);
+    for (let i = 0; i < N; i++) {
+      ring[i] = (Math.random() * 2 - 1) * (1 - i / N * 0.15);
+    }
+
+    let idx = 0;
+    let prevOut = 0;
+    for (let n = 0; n < data.length; n++) {
+      const current = ring[idx];
+      data[n] = current * 0.6 + prevOut * 0.4; // 1-pole lowpass smooths the pluck
+      prevOut = current;
+      const next = ring[(idx + 1) % N];
+      ring[idx] = decay * 0.5 * (current + next);
+      idx = (idx + 1) % N;
+    }
+
+    stringBufferCache.set(key, buffer);
+    return buffer;
   }
-}
 
-const video = document.getElementById('video');
-const canvas = document.getElementById('overlay');
-const ctx = canvas.getContext('2d');
-const stage = document.getElementById('stage');
-const hudChord = document.getElementById('hudChord');
-const hudHand = document.getElementById('hudHand');
-const gate = document.getElementById('gate');
-const gateErr = document.getElementById('gateErr');
+  function pluckString(freq, stringIndex, startTime, velocity) {
+    if (!freq) return;
+    const buffer = getStringBuffer(freq, stringIndex);
+    const src = audioCtx.createBufferSource();
+    src.buffer = buffer;
 
-let latestLandmarks = null;
-let hands = null;
+    const gain = audioCtx.createGain();
+    gain.gain.value = velocity;
 
-function resizeCanvas(){
-  canvas.width = stage.clientWidth;
-  canvas.height = stage.clientHeight;
-}
-window.addEventListener('resize', resizeCanvas);
-
-function setupMediaPipe(){
-  hands = new Hands({
-    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
-  });
-  
-  hands.setOptions({
-    maxNumHands: 1,
-    modelComplexity: 1,
-    minDetectionConfidence: 0.75,
-    minTrackingConfidence: 0.75
-  });
-
-  hands.onResults((results) => {
-    if(results.multiHandLandmarks && results.multiHandLandmarks.length > 0){
-      latestLandmarks = results.multiHandLandmarks[0];
+    const pan = audioCtx.createStereoPanner ? audioCtx.createStereoPanner() : null;
+    if (pan) {
+      pan.pan.value = (stringIndex - 2.5) / 6; // spread strings slightly L->R
+      src.connect(gain); gain.connect(pan); pan.connect(masterGain);
     } else {
-      latestLandmarks = null;
-      stopChord();
+      src.connect(gain); gain.connect(masterGain);
     }
-    drawFrame();
-  });
-}
 
-let activeSegment = -1;
-const INNER_R_FRAC = 0.14;
-
-let smX = null, smY = null;
-let smOpen = null;
-const OPEN_SMOOTHING = 0.35; 
-
-let handIsOpen = false;
-const OPEN_ENTER = 52;
-const OPEN_EXIT  = 38;
-
-let calMin = 1.05, calMax = 1.75;
-const CAL_ADAPT = 0.008;
-
-function segmentForAngle(angleDeg, count, currentActive){
-  let bestSegment = -1;
-  let minDiff = 999;
-  
-  for(let i = 0; i < count; i++){
-    const centerDeg = 90 - i * (360 / count);
-    let diff = Math.abs((angleDeg - centerDeg + 540) % 360 - 180);
-    
-    if(i === currentActive) diff -= 8;
-
-    if(diff < minDiff){
-      minDiff = diff;
-      bestSegment = i;
-    }
-  }
-  return bestSegment;
-}
-
-function computeOpennessRatio(lm){
-  const wrist = lm[0];
-  const fingers = [[5,8], [9,12], [13,16], [17,20]];
-  let sum = 0;
-
-  fingers.forEach(([mcp, tip]) => {
-    const mcpDist = Math.hypot(
-      lm[mcp].x - wrist.x, 
-      lm[mcp].y - wrist.y, 
-      (lm[mcp].z || 0) - (wrist.z || 0)
-    ) || 0.001;
-
-    const tipDist = Math.hypot(
-      lm[tip].x - wrist.x, 
-      lm[tip].y - wrist.y, 
-      (lm[tip].z || 0) - (wrist.z || 0)
-    );
-
-    sum += tipDist / mcpDist;
-  });
-
-  return sum / fingers.length;
-}
-
-function updateCalibration(raw){
-  if(raw > calMax) calMax = raw;
-  else calMax = calMax * (1 - CAL_ADAPT) + raw * CAL_ADAPT;
-  if(raw < calMin) calMin = raw;
-  else calMin = calMin * (1 - CAL_ADAPT) + raw * CAL_ADAPT;
-  if(calMax - calMin < 0.3){
-    const mid = (calMax + calMin) / 2;
-    calMax = mid + 0.15;
-    calMin = mid - 0.15;
-  }
-}
-
-function drawFrame(){
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-  const isMobile = canvas.width < 768;
-  const WHEEL_X_FRAC = isMobile ? 0.78 : 0.70;
-  const cx = canvas.width * WHEEL_X_FRAC;
-  const cy = canvas.height / 2;
-  const R = Math.min(canvas.width, canvas.height) * (isMobile ? 0.22 : 0.28);
-  const count = wheelChords.length;
-
-  let handInWheel = false;
-  let opennessPct = 0;
-
-  if(latestLandmarks){
-    let sx = latestLandmarks[8].x;
-    let sy = latestLandmarks[8].y;
-
-    smX = (1 - sx) * canvas.width;
-    smY = sy * canvas.height;
-
-    const rawOpen = computeOpennessRatio(latestLandmarks);
-    smOpen = (smOpen === null) ? rawOpen : smOpen * OPEN_SMOOTHING + rawOpen * (1 - OPEN_SMOOTHING);
-    updateCalibration(smOpen);
-    opennessPct = Math.max(0, Math.min(100, ((smOpen - calMin) / (calMax - calMin)) * 100));
-
-    if(handIsOpen && opennessPct < OPEN_EXIT) handIsOpen = false;
-    else if(!handIsOpen && opennessPct > OPEN_ENTER) handIsOpen = true;
-
-    const dx = smX - cx, dy = smY - cy;
-    const dist = Math.sqrt(dx*dx + dy*dy);
-    const angleDeg = Math.atan2(-dy, dx) * 180 / Math.PI;
-
-    if(dist <= R && dist >= R * INNER_R_FRAC){
-      handInWheel = true;
-      activeSegment = segmentForAngle(angleDeg, count, activeSegment);
-    } else {
-      activeSegment = -1;
-    }
-  } else {
-    activeSegment = -1;
-    handIsOpen = false;
-    smX = null; smY = null; smOpen = null;
+    src.start(startTime);
   }
 
-  if(handInWheel && handIsOpen && activeSegment >= 0){
-    playChord(wheelChords[activeSegment]);
-  } else {
-    stopChord();
-  }
-
-  ctx.save();
-  ctx.translate(cx, cy);
-  for(let i = 0; i < count; i++){
-    const segAngle = (360 / count);
-    const centerDeg = 90 - i * segAngle;
-    const startDeg = centerDeg + segAngle / 2;
-    const endDeg = centerDeg - segAngle / 2;
-    const startRad = -startDeg * Math.PI / 180;
-    const endRad = -endDeg * Math.PI / 180;
-
-    ctx.beginPath();
-    ctx.moveTo(0,0);
-    ctx.arc(0, 0, R, startRad, endRad, false);
-    ctx.closePath();
-
-    const isActive = (i === activeSegment);
-    ctx.fillStyle = isActive ? "rgba(201,138,75,0.42)" : "rgba(233,228,216,0.07)";
-    ctx.fill();
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = "rgba(233,228,216,0.35)";
-    ctx.stroke();
-
-    const labelRad = -centerDeg * Math.PI / 180;
-    const distFactor = count > 6 ? 0.68 : 0.62;
-    const lx = Math.cos(labelRad) * R * distFactor;
-    const ly = Math.sin(labelRad) * R * distFactor;
-    ctx.fillStyle = isActive ? "#f2d9b8" : "rgba(233,228,216,0.75)";
-    ctx.font = (isMobile ? "600 13px" : "600 16px") + " 'Fraunces', serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(wheelChords[i], lx, ly);
-  }
-
-  ctx.beginPath();
-  ctx.arc(0, 0, R, 0, Math.PI * 2);
-  ctx.strokeStyle = "rgba(233,228,216,0.35)";
-  ctx.stroke();
-
-  ctx.beginPath();
-  ctx.arc(0, 0, R * INNER_R_FRAC, 0, Math.PI * 2);
-  ctx.fillStyle = "rgba(14,12,10,0.7)";
-  ctx.fill();
-  ctx.strokeStyle = "rgba(233,228,216,0.35)";
-  ctx.stroke();
-  ctx.restore();
-
-  if(latestLandmarks && smX !== null && smY !== null){
-    ctx.beginPath();
-    ctx.arc(smX, smY, 8, 0, Math.PI * 2);
-    ctx.fillStyle = handIsOpen ? "rgba(224,86,47,0.9)" : "rgba(233,228,216,0.4)";
-    ctx.fill();
-  }
-
-  const meterX = canvas.width - 24;
-  const meterTop = cy - R;
-  const meterBottom = cy + R;
-  const meterH = meterBottom - meterTop;
-  ctx.strokeStyle = "rgba(233,228,216,0.3)";
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(meterX, meterTop);
-  ctx.lineTo(meterX, meterBottom);
-  ctx.stroke();
-  const fillH = meterH * (opennessPct / 100);
-  ctx.fillStyle = handIsOpen ? "rgba(224,86,47,0.85)" : "rgba(233,228,216,0.35)";
-  ctx.fillRect(meterX - 2, meterBottom - fillH, 4, fillH);
-
-  if(!latestLandmarks){
-    hudHand.textContent = "searching";
-    hudHand.classList.add('idle');
-  } else {
-    hudHand.textContent = (handIsOpen ? "open " : "closed ") + Math.round(opennessPct) + "%";
-    hudHand.classList.remove('idle');
-  }
-
-  if(currentHeldChord){
-    hudChord.textContent = currentHeldChord;
-    hudChord.classList.remove('idle');
-  } else {
-    hudChord.textContent = "—";
-    hudChord.classList.add('idle');
-  }
-}
-
-const MIN_CHORDS = 2;
-const MAX_CHORDS = 12;
-
-function buildPicker(){
-  const picker = document.getElementById('picker');
-  picker.innerHTML = "";
-  Object.keys(CHORD_LIBRARY).forEach(name => {
-    const chip = document.createElement('div');
-    chip.className = "chip" + (wheelChords.includes(name) ? " active" : "");
-    chip.innerHTML = `<span class="n">${name}</span>`;
-    chip.addEventListener('click', () => toggleChord(name));
-    picker.appendChild(chip);
-  });
-}
-
-function toggleChord(name){
-  const i = wheelChords.indexOf(name);
-  if(i >= 0){
-    if(wheelChords.length <= MIN_CHORDS) return;
-    wheelChords.splice(i, 1);
-  } else {
-    if(wheelChords.length >= MAX_CHORDS) return;
-    wheelChords.push(name);
-  }
-  activeSegment = -1;
-  stopChord();
-  buildPicker();
-}
-
-document.getElementById('resetBtn').addEventListener('click', () => {
-  wheelChords = ["A", "C#m", "F#m", "D", "E", "Bm", "G", "C"];
-  activeSegment = -1;
-  stopChord();
-  buildPicker();
-});
-
-document.getElementById('startBtn').addEventListener('click', async () => {
-  gateErr.textContent = "";
-
-  try{
-    setupMediaPipe();
-    await Tone.start();
-    await initAudio();
-    
-    // Ensure the volume slider state matches audio engine on start
-    masterGain.gain.value = parseInt(volumeSlider.value, 10) / 100;
-
-    const camera = new Camera(video, {
-      onFrame: async () => {
-        await hands.send({image: video});
-      },
-      width: 640,
-      height: 480
+  function strumChord(chord) {
+    ensureAudio();
+    const now = audioCtx.currentTime + 0.01;
+    chord.notes.forEach((freq, i) => {
+      if (!freq) return;
+      const delay = i * 0.016; // strum spread, low string first
+      pluckString(freq, i, now + delay, 0.85);
     });
-    
-    await camera.start();
-
-    resizeCanvas();
-    buildPicker();
-    gate.classList.add('hidden');
-  } catch(err){
-    gateErr.textContent = "Couldn't start (" + err.message + "). Check camera access and try again.";
   }
-});
 
-resizeCanvas();
+  function clickSound(accent) {
+    ensureAudio();
+    const now = audioCtx.currentTime;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = "square";
+    osc.frequency.value = accent ? 1500 : 900;
+    gain.gain.setValueAtTime(accent ? 0.3 : 0.16, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
+    osc.connect(gain); gain.connect(masterGain);
+    osc.start(now); osc.stop(now + 0.07);
+  }
+
+  function feedbackTone(kind) {
+    ensureAudio();
+    const now = audioCtx.currentTime;
+    const freqs = kind === "perfect" ? [880, 1320] : kind === "good" ? [660] : [220, 180];
+    freqs.forEach((f, i) => {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = kind === "miss" ? "sawtooth" : "triangle";
+      osc.frequency.value = f;
+      gain.gain.setValueAtTime(0.22, now + i * 0.05);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.05 + 0.22);
+      osc.connect(gain); gain.connect(masterGain);
+      osc.start(now + i * 0.05); osc.stop(now + i * 0.05 + 0.24);
+    });
+  }
+
+  /* =========================================================
+     METRONOME
+  ========================================================= */
+  const Metronome = {
+    bpm: 80, running: false, beat: 0, timer: null, onBeat: null,
+    start() {
+      this.stop(); this.running = true; this.beat = 0;
+      const tick = () => {
+        if (!this.running) return;
+        clickSound(this.beat === 0);
+        if (this.onBeat) this.onBeat(this.beat);
+        this.beat = (this.beat + 1) % 4;
+        this.timer = setTimeout(tick, 60000 / this.bpm);
+      };
+      tick();
+    },
+    stop() { this.running = false; if (this.timer) clearTimeout(this.timer); this.timer = null; }
+  };
+
+  /* =========================================================
+     WHEEL RENDERING (SVG)
+  ========================================================= */
+  const svg = document.getElementById("wheelSvg");
+  const segEls = [];
+  const subEls = [];
+
+  function polar(cx, cy, r, angleDeg) {
+    const rad = (angleDeg - 90) * Math.PI / 180;
+    return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
+  }
+  function annularSectorPath(cx, cy, rOuter, rInner, startAngle, endAngle) {
+    const p1 = polar(cx, cy, rOuter, startAngle);
+    const p2 = polar(cx, cy, rOuter, endAngle);
+    const p3 = polar(cx, cy, rInner, endAngle);
+    const p4 = polar(cx, cy, rInner, startAngle);
+    const largeArc = (endAngle - startAngle) % 360 > 180 ? 1 : 0;
+    return [
+      `M ${p1.x} ${p1.y}`,
+      `A ${rOuter} ${rOuter} 0 ${largeArc} 1 ${p2.x} ${p2.y}`,
+      `L ${p3.x} ${p3.y}`,
+      `A ${rInner} ${rInner} 0 ${largeArc} 0 ${p4.x} ${p4.y}`,
+      "Z"
+    ].join(" ");
+  }
+
+  function buildWheel() {
+    svg.innerHTML = "";
+    const ns = "http://www.w3.org/2000/svg";
+
+    CHORDS.forEach((chord, i) => {
+      const startA = i * SEG_ANGLE;
+      const endA = startA + SEG_ANGLE;
+      const path = document.createElementNS(ns, "path");
+      path.setAttribute("d", annularSectorPath(CENTER.x, CENTER.y, OUTER_R, INNER_R, startA, endA));
+      path.setAttribute("class", "wheel-seg");
+      path.dataset.index = i;
+      path.dataset.name = chord.name;
+      path.addEventListener("click", () => handleManualPick(i));
+      svg.appendChild(path);
+      segEls[i] = path;
+
+      const mid = startA + SEG_ANGLE / 2;
+      const labelPos = polar(CENTER.x, CENTER.y, (OUTER_R + INNER_R) / 2 + 6, mid);
+      const label = document.createElementNS(ns, "text");
+      label.setAttribute("x", labelPos.x);
+      label.setAttribute("y", labelPos.y);
+      label.setAttribute("class", "wheel-label");
+      label.textContent = chord.name;
+      svg.appendChild(label);
+
+      const subPos = polar(CENTER.x, CENTER.y, (OUTER_R + INNER_R) / 2 + 24, mid);
+      const sub = document.createElementNS(ns, "text");
+      sub.setAttribute("x", subPos.x);
+      sub.setAttribute("y", subPos.y);
+      sub.setAttribute("class", "wheel-sub");
+      sub.textContent = chord.diagram;
+      svg.appendChild(sub);
+      subEls[i] = sub;
+    });
+
+    const center = document.createElementNS(ns, "circle");
+    center.setAttribute("cx", CENTER.x);
+    center.setAttribute("cy", CENTER.y);
+    center.setAttribute("r", INNER_R - 4);
+    center.setAttribute("class", "wheel-center");
+    svg.appendChild(center);
+
+    const centerLabel = document.createElementNS(ns, "text");
+    centerLabel.setAttribute("x", CENTER.x);
+    centerLabel.setAttribute("y", CENTER.y);
+    centerLabel.setAttribute("class", "wheel-center-label");
+    centerLabel.textContent = "Chord Drills";
+    svg.appendChild(centerLabel);
+  }
+  buildWheel();
+
+  function clearSegStates() {
+    segEls.forEach(el => el.classList.remove("target", "beat", "correct", "wrong", "hovered"));
+    subEls.forEach(el => el.classList.remove("show"));
+  }
+  function setHovered(i) {
+    segEls.forEach((el, idx) => el.classList.toggle("hovered", idx === i));
+    subEls.forEach((el, idx) => el.classList.toggle("show", idx === i));
+  }
+  function setTargetSeg(i) {
+    segEls.forEach((el, idx) => el.classList.toggle("target", idx === i));
+    subEls.forEach((el, idx) => el.classList.toggle("show", idx === i || el.classList.contains("show")));
+  }
+  function flashResult(i, kind) {
+    const el = segEls[i];
+    if (!el) return;
+    el.classList.add(kind);
+    setTimeout(() => el.classList.remove(kind), 420);
+  }
+
+  /* =========================================================
+     GAME STATE
+  ========================================================= */
+  const state = {
+    mode: "freestyle", running: false, sequence: [], seqIndex: -1, targetIndex: -1,
+    windowOpen: false, pickedThisBeat: false, score: 0, correctCount: 0, totalCount: 0,
+    reactionTimes: [], targetShownAt: 0, startTime: 0, timerRAF: null,
+    lastHandState: "closed", hoveredSeg: -1, streak: 0,
+  };
+
+  const els = {
+    bpmSlider: document.getElementById("bpmSlider"),
+    bpmVal: document.getElementById("bpmVal"),
+    volSlider: document.getElementById("volSlider"),
+    startStopBtn: document.getElementById("startStopBtn"),
+    scoreVal: document.getElementById("scoreVal"),
+    timeVal: document.getElementById("timeVal"),
+    targetChord: document.getElementById("targetChord"),
+    reactionVal: document.getElementById("reactionVal"),
+    streakVal: document.getElementById("streakVal"),
+    accVal: document.getElementById("accVal"),
+    statusText: document.getElementById("statusText"),
+    progList: document.getElementById("progList"),
+    modeTabs: document.querySelectorAll(".mode-tabs button"),
+    songSelectWrap: document.getElementById("songSelectWrap"),
+    songPreset: document.getElementById("songPreset"),
+    customProg: document.getElementById("customProg"),
+    handCursor: document.getElementById("handCursor"),
+    wheelWrap: document.getElementById("wheelWrap"),
+    summaryOverlay: document.getElementById("summaryOverlay"),
+    sumScore: document.getElementById("sumScore"),
+    sumAcc: document.getElementById("sumAcc"),
+    sumReact: document.getElementById("sumReact"),
+    sumBest: document.getElementById("sumBest"),
+    playerNameInput: document.getElementById("playerNameInput"),
+    submitScoreBtn: document.getElementById("submitScoreBtn"),
+    closeSummaryBtn: document.getElementById("closeSummaryBtn"),
+    leaderboardList: document.getElementById("leaderboardList"),
+    leaderboardHint: document.getElementById("leaderboardHint"),
+  };
+
+  els.bpmSlider.addEventListener("input", () => {
+    Metronome.bpm = +els.bpmSlider.value;
+    els.bpmVal.textContent = els.bpmSlider.value;
+  });
+  els.volSlider.addEventListener("input", () => setVolume(+els.volSlider.value / 100));
+  setVolume(0.7);
+
+  function modeStartLabel() {
+    if (state.mode === "freestyle") return "Start Freestyle";
+    if (state.mode === "drill") return "Start Drill";
+    return "Start Song";
+  }
+
+  els.modeTabs.forEach(btn => {
+    btn.addEventListener("click", () => {
+      els.modeTabs.forEach(b => { b.classList.remove("active"); b.setAttribute("aria-selected", "false"); });
+      btn.classList.add("active"); btn.setAttribute("aria-selected", "true");
+      state.mode = btn.dataset.mode;
+      els.songSelectWrap.hidden = state.mode !== "song";
+      stopGame(true);
+      updateStatus(modeHint());
+      els.startStopBtn.textContent = modeStartLabel();
+    });
+  });
+
+  els.songPreset.addEventListener("change", () => {
+    els.customProg.hidden = els.songPreset.value !== "custom";
+  });
+
+  function modeHint() {
+    if (state.mode === "freestyle") return "Point at any chord to hear it — great for warming up.";
+    if (state.mode === "drill") return "Press Start for an 8-chord timed drill.";
+    return "Pick a song, then press Start to play through its progression.";
+  }
+  updateStatus(modeHint());
+  els.startStopBtn.textContent = modeStartLabel();
+
+  function updateStatus(text, kind) {
+    els.statusText.textContent = text;
+    els.statusText.className = "status-text" + (kind ? " " + kind : "");
+  }
+  function setTargetDisplay(text, opts) {
+    els.targetChord.textContent = text;
+    els.targetChord.classList.toggle("idle", !!(opts && opts.idle));
+    els.targetChord.classList.toggle("pulse", !!(opts && opts.pulse));
+  }
+
+  /* =========================================================
+     START / STOP
+  ========================================================= */
+  els.startStopBtn.addEventListener("click", () => {
+    if (state.running) stopGame(); else startGame();
+  });
+
+  function startGame() {
+    ensureAudio();
+    if (state.mode === "freestyle") {
+      updateStatus("Freestyle — point at any chord to strum it.");
+      setTargetDisplay("Freestyle", { idle: true });
+      state.running = true;
+      els.startStopBtn.textContent = "Stop";
+      els.startStopBtn.classList.add("stop");
+      return;
+    }
+
+    state.sequence = buildSequence();
+    state.seqIndex = -1;
+    state.score = 0; state.correctCount = 0; state.totalCount = 0; state.reactionTimes = []; state.streak = 0;
+    state.running = true;
+    state.startTime = performance.now();
+    els.scoreVal.textContent = "0";
+    els.streakVal.textContent = "0";
+    els.accVal.textContent = "—";
+    els.reactionVal.textContent = "—";
+
+    els.startStopBtn.textContent = "Stop";
+    els.startStopBtn.classList.add("stop");
+    renderProgList();
+
+    Metronome.bpm = +els.bpmSlider.value;
+    Metronome.onBeat = onMetronomeBeat;
+    Metronome.start();
+    tickTimer();
+  }
+
+  function stopGame(silent) {
+    state.running = false;
+    Metronome.stop();
+    clearSegStates();
+    setTargetDisplay("Ready", { idle: true });
+    els.startStopBtn.textContent = modeStartLabel();
+    els.startStopBtn.classList.remove("stop");
+    if (state.timerRAF) cancelAnimationFrame(state.timerRAF);
+    if (!silent) updateStatus(modeHint());
+    els.progList.hidden = true;
+  }
+
+  function buildSequence() {
+    if (state.mode === "song") {
+      let chords;
+      if (els.songPreset.value === "custom") {
+        chords = els.customProg.value.split(",").map(s => s.trim()).filter(Boolean)
+          .map(n => (CHORD_BY_NAME[n] ? n : null)).filter(Boolean);
+        if (!chords.length) chords = ["G", "C", "D", "Em"];
+      } else {
+        chords = SONGS[els.songPreset.value] || SONGS.wonderwall;
+      }
+      return [...chords, ...chords];
+    }
+    const seq = [];
+    let last = -1;
+    for (let i = 0; i < 8; i++) {
+      let idx;
+      do { idx = Math.floor(Math.random() * CHORDS.length); } while (idx === last);
+      last = idx;
+      seq.push(CHORDS[idx].name);
+    }
+    return seq;
+  }
+
+  function renderProgList() {
+    if (state.mode !== "song") { els.progList.hidden = true; return; }
+    els.progList.hidden = false;
+    els.progList.innerHTML = "";
+    state.sequence.forEach((name, i) => {
+      const chip = document.createElement("span");
+      chip.className = "prog-chip";
+      chip.textContent = name;
+      chip.dataset.i = i;
+      els.progList.appendChild(chip);
+    });
+  }
+  function updateProgList() {
+    if (state.mode !== "song") return;
+    [...els.progList.children].forEach((chip, i) => {
+      chip.classList.toggle("current", i === state.seqIndex);
+      chip.classList.toggle("done", i < state.seqIndex);
+    });
+  }
+
+  function tickTimer() {
+    if (!state.running) return;
+    const t = (performance.now() - state.startTime) / 1000;
+    els.timeVal.textContent = t.toFixed(1) + "s";
+    state.timerRAF = requestAnimationFrame(tickTimer);
+  }
+
+  /* =========================================================
+     DRILL / SONG BEAT LOGIC
+  ========================================================= */
+  function onMetronomeBeat(beat) {
+    if (!state.running || state.mode === "freestyle") return;
+    if (beat === 0) advanceSequence();
+
+    if (state.windowOpen) {
+      const seg = segEls[state.targetIndex];
+      if (seg) seg.classList.toggle("beat", beat % 2 === 0);
+    }
+
+    if (beat === 3 && state.windowOpen) {
+      setTimeout(() => { if (state.windowOpen) resolvePick(null); }, (60000 / Metronome.bpm) * 0.85);
+    }
+  }
+
+  function advanceSequence() {
+    if (state.windowOpen) resolvePick(null);
+
+    state.seqIndex++;
+    if (state.seqIndex >= state.sequence.length) { finishGame(); return; }
+    const name = state.sequence[state.seqIndex];
+    const chord = CHORD_BY_NAME[name];
+    if (!chord) { advanceSequence(); return; }
+
+    state.targetIndex = chord.index;
+    state.targetShownAt = performance.now();
+    state.windowOpen = true;
+    state.pickedThisBeat = false;
+
+    clearSegStates();
+    setTargetSeg(chord.index);
+    setTargetDisplay(chord.name, { pulse: true });
+    updateStatus(`Point to ${chord.name}…`);
+    updateProgList();
+    announce(chord.name);
+  }
+
+  function announce(name) {
+    if (!("speechSynthesis" in window)) return;
+    try {
+      const u = new SpeechSynthesisUtterance(name);
+      u.rate = 1.1; u.pitch = 1; u.volume = 0.8;
+      speechSynthesis.cancel();
+      speechSynthesis.speak(u);
+    } catch (e) { /* TTS optional */ }
+  }
+
+  function resolvePick(pickedIndex) {
+    if (!state.windowOpen) return;
+    state.windowOpen = false;
+    const target = state.targetIndex;
+    const reactionMs = performance.now() - state.targetShownAt;
+    state.totalCount++;
+
+    if (pickedIndex === target) {
+      const fast = reactionMs < (60000 / Metronome.bpm) * 1.6;
+      state.score += fast ? 100 : 50;
+      state.correctCount++;
+      state.streak++;
+      state.reactionTimes.push(reactionMs);
+      flashResult(target, "correct");
+      strumChord(CHORDS[target]);
+      feedbackTone(fast ? "perfect" : "good");
+      updateStatus(fast ? "Perfect!" : "Good", fast ? "perfect" : "good");
+      els.reactionVal.textContent = Math.round(reactionMs) + "ms";
+    } else {
+      state.streak = 0;
+      flashResult(target, "wrong");
+      feedbackTone("miss");
+      updateStatus(pickedIndex === null ? "Too slow!" : "Wrong chord!", "bad");
+    }
+
+    els.scoreVal.textContent = state.score;
+    els.streakVal.textContent = state.streak;
+    const acc = state.totalCount ? Math.round((state.correctCount / state.totalCount) * 100) : 0;
+    els.accVal.textContent = acc + "%";
+  }
+
+  function finishGame() {
+    Metronome.stop();
+    state.running = false;
+    clearSegStates();
+    setTargetDisplay("Done!", { idle: true });
+    els.startStopBtn.textContent = modeStartLabel();
+    els.startStopBtn.classList.remove("stop");
+    if (state.timerRAF) cancelAnimationFrame(state.timerRAF);
+
+    const acc = state.totalCount ? Math.round((state.correctCount / state.totalCount) * 100) : 0;
+    const avgReact = state.reactionTimes.length
+      ? Math.round(state.reactionTimes.reduce((a, b) => a + b, 0) / state.reactionTimes.length)
+      : 0;
+
+    const best = saveBestScore(state.mode, state.score);
+
+    els.sumScore.textContent = state.score;
+    els.sumAcc.textContent = acc + "%";
+    els.sumReact.textContent = avgReact + "ms";
+    els.sumBest.textContent = best;
+    els.summaryOverlay.hidden = false;
+    els.playerNameInput.focus();
+  }
+
+  /* =========================================================
+     LOCAL BEST SCORES
+  ========================================================= */
+  function loadBestScores() {
+    try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; }
+    catch (e) { return {}; }
+  }
+  function saveBestScore(mode, score) {
+    const all = loadBestScores();
+    all[mode] = Math.max(all[mode] || 0, score);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
+    return all[mode];
+  }
+
+  els.closeSummaryBtn.addEventListener("click", () => { els.summaryOverlay.hidden = true; });
+
+  els.submitScoreBtn.addEventListener("click", async () => {
+    els.submitScoreBtn.disabled = true;
+    els.submitScoreBtn.textContent = "Submitting…";
+    const name = (els.playerNameInput.value || "anonymous").trim().slice(0, 16) || "anonymous";
+    const acc = state.totalCount ? Math.round((state.correctCount / state.totalCount) * 100) : 0;
+    const payload = { name, score: state.score, accuracy: acc, mode: state.mode, timestamp: new Date().toISOString() };
+    try {
+      await fetch(WORKER_URL + "/api/score", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+      });
+      els.submitScoreBtn.textContent = "Submitted!";
+      loadLeaderboard();
+    } catch (e) {
+      els.submitScoreBtn.textContent = "Offline — try later";
+    }
+    setTimeout(() => {
+      els.summaryOverlay.hidden = true;
+      els.submitScoreBtn.disabled = false;
+      els.submitScoreBtn.textContent = "Submit score";
+    }, 1200);
+  });
+
+  function renderLeaderboard(entries, isDemo) {
+    els.leaderboardList.innerHTML = "";
+    entries.slice(0, 10).forEach((entry, i) => {
+      const li = document.createElement("li");
+      if (entry.demo) li.classList.add("demo");
+      li.innerHTML = `<span class="lb-rank">${i + 1}</span><span><b>${escapeHtml(entry.name || "anon")}</b> · ${escapeHtml(entry.mode || "")}</span><span class="lb-score">${entry.score}</span>`;
+      els.leaderboardList.appendChild(li);
+    });
+    els.leaderboardHint.textContent = isDemo
+      ? "Demo score shown — finish a drill to add your own."
+      : "Finish a drill to add your score.";
+  }
+  renderLeaderboard(DEMO_LEADERBOARD, true);
+
+  async function loadLeaderboard() {
+    try {
+      const res = await fetch(WORKER_URL + "/api/leaderboard");
+      if (!res.ok) throw new Error("bad response");
+      const data = await res.json();
+      if (Array.isArray(data) && data.length) renderLeaderboard(data, false);
+    } catch (e) {
+      // worker not deployed / offline — keep the demo row
+    }
+  }
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+  loadLeaderboard();
+
+  /* =========================================================
+     MANUAL / FREESTYLE PICK
+  ========================================================= */
+  function handleManualPick(index) {
+    ensureAudio();
+    if (state.mode === "freestyle") {
+      strumChord(CHORDS[index]);
+      flashResult(index, "correct");
+      return;
+    }
+    if (state.running && state.windowOpen && !state.pickedThisBeat) {
+      state.pickedThisBeat = true;
+      resolvePick(index);
+    }
+  }
+
+  /* =========================================================
+     MEDIAPIPE HAND TRACKING
+  ========================================================= */
+  const videoEl = document.getElementById("inputVideo");
+  const overlayCanvas = document.getElementById("overlayCanvas");
+  const overlayCtx = overlayCanvas.getContext("2d");
+  const camStatus = document.getElementById("camStatus");
+  const camToggleBtn = document.getElementById("camToggleBtn");
+  const camPlaceholder = document.getElementById("camPlaceholder");
+
+  let hands = null;
+  let camera = null;
+  let cameraRunning = false;
+  let lastProcessTime = 0;
+  const TARGET_FPS = 18;
+  const FRAME_INTERVAL = 1000 / TARGET_FPS;
+  let debounceTimer = null;
+  let stableSeg = -1;
+
+  function setupHands() {
+    hands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
+    hands.setOptions({ maxNumHands: 1, modelComplexity: 0, minDetectionConfidence: 0.6, minTrackingConfidence: 0.5 });
+    hands.onResults(onHandResults);
+  }
+
+  function onHandResults(results) {
+    overlayCanvas.width = videoEl.videoWidth || 320;
+    overlayCanvas.height = videoEl.videoHeight || 240;
+    overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+
+    if (!results.multiHandLandmarks || !results.multiHandLandmarks.length) {
+      els.handCursor.style.display = "none";
+      return;
+    }
+
+    const lm = results.multiHandLandmarks[0];
+    if (window.drawConnectors && window.HAND_CONNECTIONS) {
+      drawConnectors(overlayCtx, lm, HAND_CONNECTIONS, { color: "#0a84ff", lineWidth: 2 });
+      drawLandmarks(overlayCtx, lm, { color: "#ffd60a", radius: 2 });
+    }
+
+    const isOpen = isHandOpen(lm);
+    updateCursorAndSegment(lm[8], isOpen);
+
+    if (isOpen && state.lastHandState !== "open") onHandOpen();
+    state.lastHandState = isOpen ? "open" : "closed";
+  }
+
+  function isHandOpen(lm) {
+    const wrist = lm[0];
+    const scaleRef = dist(wrist, lm[9]);
+    if (scaleRef < 1e-4) return false;
+    const tips = [8, 12, 16, 20];
+    const avgTipDist = tips.reduce((sum, i) => sum + dist(wrist, lm[i]), 0) / tips.length;
+    return (avgTipDist / scaleRef) > 1.7;
+  }
+  function dist(a, b) {
+    const dx = a.x - b.x, dy = a.y - b.y, dz = (a.z || 0) - (b.z || 0);
+    return Math.sqrt(dx * dx + dy * dy + dz * dz);
+  }
+
+  function updateCursorAndSegment(tip, isOpen) {
+    const mirroredX = 1 - tip.x;
+    const rect = els.wheelWrap.getBoundingClientRect();
+    const nx = clamp01((mirroredX - 0.15) / 0.7);
+    const ny = clamp01((tip.y - 0.15) / 0.7);
+    const px = nx * rect.width, py = ny * rect.height;
+
+    els.handCursor.style.display = "block";
+    els.handCursor.style.left = px + "px";
+    els.handCursor.style.top = py + "px";
+    els.handCursor.classList.toggle("open", isOpen);
+
+    const cx = rect.width / 2, cy = rect.height / 2;
+    const dx = px - cx, dy = py - cy;
+    const radius = Math.sqrt(dx * dx + dy * dy);
+    const minR = (INNER_R / 240) * (rect.width / 2) * 0.6;
+    if (radius < minR) { setHovered(-1); return; }
+
+    let angle = Math.atan2(dy, dx) * 180 / Math.PI + 90;
+    angle = (angle + 360) % 360;
+    const idx = Math.floor(angle / SEG_ANGLE) % SEGMENTS;
+
+    if (idx !== stableSeg) {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        stableSeg = idx;
+        setHovered(idx);
+        state.hoveredSeg = idx;
+      }, 200);
+    }
+  }
+  function clamp01(v) { return Math.max(0, Math.min(1, v)); }
+
+  function onHandOpen() {
+    const idx = state.hoveredSeg;
+    if (idx == null || idx < 0) return;
+    handleManualPick(idx);
+  }
+
+  async function startCamera() {
+    if (cameraRunning) return;
+    if (!hands) setupHands();
+    try {
+      camera = new Camera(videoEl, {
+        onFrame: async () => {
+          const now = performance.now();
+          if (now - lastProcessTime < FRAME_INTERVAL) return;
+          lastProcessTime = now;
+          await hands.send({ image: videoEl });
+        },
+        width: 320, height: 240,
+      });
+      await camera.start();
+      cameraRunning = true;
+      camStatus.classList.remove("denied");
+      camStatus.classList.add("live");
+      camStatus.innerHTML = '<span class="dot"></span>live';
+      camPlaceholder.style.display = "none";
+      camToggleBtn.textContent = "Disable Camera";
+    } catch (e) {
+      updateStatus("Camera access denied — click segments instead.", "bad");
+      camStatus.classList.add("denied");
+      camStatus.innerHTML = '<span class="dot"></span>no access';
+      camPlaceholder.querySelector("p").textContent = "Camera access denied — click a wheel segment instead";
+    }
+  }
+
+  function stopCamera() {
+    if (camera && camera.stop) camera.stop();
+    const stream = videoEl.srcObject;
+    if (stream) stream.getTracks().forEach(t => t.stop());
+    videoEl.srcObject = null;
+    cameraRunning = false;
+    camStatus.classList.remove("live");
+    camStatus.innerHTML = '<span class="dot"></span>off';
+    camPlaceholder.style.display = "flex";
+    camToggleBtn.textContent = "Enable Camera";
+    els.handCursor.style.display = "none";
+    setHovered(-1);
+  }
+
+  camToggleBtn.addEventListener("click", () => {
+    ensureAudio();
+    if (cameraRunning) stopCamera(); else startCamera();
+  });
+
+  /* Keyboard fallback: number keys 1-9,0 pick wheel segments in order */
+  window.addEventListener("keydown", (e) => {
+    const map = "1234567890";
+    const i = map.indexOf(e.key);
+    if (i === -1) return;
+    handleManualPick(i);
+  });
+
+})();
 </script>
 </body>
 </html>
